@@ -1,0 +1,21 @@
+# Environment & Secrets
+.env
+
+# Local Database, Backups & User Vault
+*.db
+*.db-shm
+*.db-wal
+backups/
+vault/
+covers/*
+!covers/.gitkeep
+
+# Compiled Binaries & Release Artifacts
+*.exe
+*.exe~
+checksums.txt
+
+# Scratch & IDE
+scratch/
+.vscode/
+.idea/

@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>LearnChain - ระบบการเรียนรู้และวุฒิบัตรบล็อกเชน (Soulbound Token)</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- YouTube IFrame API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <!-- Google Identity Services (Google Sign-In) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body class="theme-sky">
+
+  <!-- ============================================================
+       1. AUTH LANDING SCREEN (แสดงเฉพาะเมื่อยังไม่ได้ล็อกอิน)
+       ============================================================ -->
+  <div id="authLandingScreen" class="auth-landing-screen">
+    <div class="auth-landing-card">
+      <div style="display:flex; justify-content:flex-end; margin-bottom:0.25rem;">
+        <select id="landingThemeSwitcher" class="role-switcher-select" onchange="changeAppTheme(this.value)" title="เลือกธีมสีของระบบ">
+          <option value="theme-sky">🩵 ขาว-ฟ้าพาสเทล</option>
+          <option value="theme-pink">🌸 ขาว-ชมพูซากุระ</option>
+          <option value="theme-lavender">💜 ขาว-ม่วงลาเวนเดอร์</option>
+          <option value="theme-mint">🌿 ขาว-มิ้นต์พาสเทล</option>
+          <option value="theme-dark">🌙 โหมดมืด</option>
+        </select>
+      </div>
+      <div class="auth-brand-icon">🩺</div>
+      <h1 class="auth-brand-title">ระบบการเรียนรู้ทางการพยาบาล</h1>
+      <p class="auth-brand-sub" style="margin-bottom:0.35rem; font-weight:600; color:var(--accent); line-height:1.55;">
+        งานการพยาบาลผู้ป่วยพิเศษ 2-3 ฝ่ายการพยาบาล<br>โรงพยาบาลศรีนครินทร์ คณะแพทยศาสตร์ มหาวิทยาลัยขอนแก่น
+      </p>
+      <p class="auth-brand-sub" style="margin-bottom:1rem;">ระบบบทเรียนออนไลน์และวุฒิบัตรอิเล็กทรอนิกส์บนบล็อกเชน</p>
+
+      <!-- Auth Mode Tabs: เข้าสู่ระบบ vs สมัครสมาชิกใหม่ -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; background:var(--bg); padding:0.3rem; border-radius:var(--r); border:1px solid var(--border); margin-bottom:1.1rem;">
+        <button type="button" id="tabBtnAuthLogin" class="btn btn-sm btn-primary" onclick="switchAuthTab('login')">
+          🔐 เข้าสู่ระบบ
+        </button>
+        <button type="button" id="tabBtnAuthRegister" class="btn btn-sm btn-wallet" style="border:none;" onclick="switchAuthTab('register')">
+          📝 สมัครสมาชิก
+        </button>
+      </div>
+
+      <!-- ==================================================
+           TAB 1: เข้าสู่ระบบด้วยอีเมลและรหัสผ่าน
+           ================================================== -->
+      <div id="authRoleSelectBox" class="auth-role-select-box" style="margin-top:0; border-top:none; padding-top:0;">
+        <div id="googleVerifiedNotice" class="hidden" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.35); color:var(--success); padding:0.6rem 0.85rem; border-radius:var(--r); font-size:0.83rem; margin-bottom:0.85rem;">
+          ✅ ยืนยันบัญชีเรียบร้อยแล้ว กรุณาเลือกบทบาทเพื่อเข้าสู่ระบบ
+        </div>
+        <form id="landingLoginForm" onsubmit="submitLandingLogin(event)">
+          <div class="form-group">
+            <label class="form-label">อีเมล *:</label>
+            <input type="text" id="landingEmail" class="form-input" placeholder="เช่น yourname@gmail.com" required
+                   oninput="checkEmailManagerAccess(this.value)" onchange="checkEmailManagerAccess(this.value)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">รหัสผ่าน *:</label>
+            <input type="password" id="landingPassword" class="form-input" placeholder="กรอกรหัสผ่านของคุณ" required>
+          </div>
+
+          <label class="form-label" style="margin-top:0.65rem; display:block;">เลือกบทบาท *:</label>
+          <div class="role-cards-grid">
+            <label id="roleCard_learner" class="role-card-option selected" onclick="selectLandingRole('learner')">
+              <input type="radio" name="landingRole" value="learner" checked onchange="selectLandingRole('learner')">
+              <div style="flex:1;">
+                <div class="rc-title">🎓 ผู้เรียน</div>
+                <div class="rc-sub">เข้าเรียน ทำแบบทดสอบ และรับวุฒิบัตร</div>
+              </div>
+              <button type="button" class="btn btn-sm btn-wallet" onclick="quickLoginWithRole(event, 'learner')">เข้าใช้ ›</button>
+            </label>
+            <label id="roleCard_creator" class="role-card-option" onclick="selectLandingRole('creator')">
+              <input type="radio" name="landingRole" value="creator" onchange="selectLandingRole('creator')">
+              <div style="flex:1;">
+                <div class="rc-title">👨‍🏫 ผู้สร้างบทเรียน</div>
+                <div class="rc-sub">สร้างบทเรียน แก้ไข ซ่อน และตั้งเวลาเปิดเรียน</div>
+              </div>
+              <button type="button" class="btn btn-sm btn-wallet" onclick="quickLoginWithRole(event, 'creator')">เข้าใช้ ›</button>
+            </label>
+            <label id="roleCard_manager" class="role-card-option hidden" onclick="selectLandingRole('manager')">
+              <input type="radio" name="landingRole" value="manager" onchange="selectLandingRole('manager')">
+              <div style="flex:1;">
+                <div class="rc-title">👔 ผู้จัดการ <span class="badge badge-ok" style="font-size:0.68rem; margin-left:0.3rem;">ได้รับสิทธิ์</span></div>
+                <div class="rc-sub">มอบหมายบทเรียน เพิ่มผู้จัดการ และดูสถิติรายหน่วยงาน</div>
+              </div>
+              <button type="button" class="btn btn-sm btn-wallet" onclick="quickLoginWithRole(event, 'manager')">เข้าใช้ ›</button>
+            </label>
+          </div>
+
+          <button type="submit" id="btnLandingSubmit" class="btn btn-primary" style="width:100%; padding:0.75rem; margin-top:0.65rem; font-size:0.98rem;">
+            🚀 เข้าสู่ระบบในฐานะ "🎓 ผู้เรียน"
+          </button>
+        </form>
+
+        <div style="margin-top:0.85rem; text-align:center; font-size:0.82rem; color:var(--muted);">
+          ยังไม่มีบัญชีผู้ใช้งาน? <a href="javascript:void(0)" style="color:var(--primary); font-weight:600; text-decoration:underline;" onclick="switchAuthTab('register')">สมัครสมาชิกที่นี่</a>
+        </div>
+        <div id="g_id_signin_landing" style="display:flex; justify-content:center; margin-top:0.65rem;"></div>
+      </div>
+
+      <!-- ==================================================
+           TAB 2: สมัครสมาชิกใหม่
+           ================================================== -->
+      <div id="authRegisterBox" class="auth-role-select-box hidden" style="margin-top:0; border-top:none; padding-top:0;">
+        <form id="landingRegisterForm" onsubmit="submitLandingRegister(event)">
+          <div class="form-group">
+            <label class="form-label">อีเมล *:</label>
+            <input type="email" id="regEmail" class="form-input" placeholder="เช่น nurse.kku@gmail.com" required>
+          </div>
+          <div class="form-grid-2" style="gap:0.6rem;">
+            <div class="form-group">
+              <label class="form-label">รหัสผ่าน *:</label>
+              <input type="password" id="regPassword" class="form-input" placeholder="อย่างน้อย 4 ตัวอักษร" minlength="4" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">ยืนยันรหัสผ่าน *:</label>
+              <input type="password" id="regPasswordConfirm" class="form-input" placeholder="กรอกรหัสผ่านซ้ำ" minlength="4" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">ชื่อ - นามสกุล *:</label>
+            <input type="text" id="regName" class="form-input" placeholder="เช่น พว. กานดา สุขใจ" required>
+          </div>
+          <div class="form-grid-2" style="gap:0.6rem;">
+            <div class="form-group">
+              <label class="form-label">หน่วยงาน *:</label>
+              <select id="regWard" class="form-input" required>
+                <option value="หอสงฆ์">🏥 หอสงฆ์</option>
+                <option value="สว.11" selected>🏥 สว.11</option>
+                <option value="สว.12">🏥 สว.12</option>
+                <option value="8A">🏥 8A</option>
+                <option value="8B">🏥 8B</option>
+                <option value="9A">🏥 9A</option>
+                <option value="9B">🏥 9B</option>
+                <option value="9C">🏥 9C</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">บทบาทเริ่มต้น *:</label>
+              <select id="regRole" class="form-input" required>
+                <option value="learner">🎓 ผู้เรียน</option>
+                <option value="creator">👨‍🏫 ผู้สร้างบทเรียน</option>
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" id="btnRegisterSubmit" class="btn btn-primary" style="width:100%; padding:0.75rem; margin-top:0.5rem; font-size:0.98rem;">
+            ✨ สมัครสมาชิก
+          </button>
+        </form>
+        <div style="margin-top:0.85rem; text-align:center; font-size:0.82rem; color:var(--muted);">
+          มีบัญชีแล้ว? <a href="javascript:void(0)" style="color:var(--primary); font-weight:600; text-decoration:underline;" onclick="switchAuthTab('login')">เข้าสู่ระบบ</a>
+        </div>
+      </div>
+
+      <div style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px dashed var(--border); text-align:center;">
+        <button type="button" class="btn btn-sm btn-wallet" onclick="openSyncModal()" title="เชื่อมต่อหรือซิงค์ข้อมูลระหว่างเครื่อง">
+          🔄 ซิงค์เครื่อง / เชื่อมต่อข้ามเครื่อง
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================
+       2. MAIN APP CONTAINER (แสดงเมื่อล็อกอินสำเร็จแล้วเท่านั้น)
+       ============================================================ -->
+  <div id="appContainer" class="hidden">
+
+    <!-- ===== NAVBAR ===== -->
+    <header class="navbar">
+      <div class="nav-inner">
+        <div class="nav-brand-row">
+          <div class="nav-brand">
+            <span class="brand-icon">🩺</span>
+            <div>
+              <div class="brand-title">ระบบการเรียนรู้ทางการพยาบาล</div>
+              <div class="brand-sub" style="line-height:1.45;">งานการพยาบาลผู้ป่วยพิเศษ 2-3 ฝ่ายการพยาบาล<br>โรงพยาบาลศรีนครินทร์ คณะแพทยศาสตร์ มหาวิทยาลัยขอนแก่น</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="navRightMenu" class="nav-right">
+          <!-- Role Badge & Quick Switcher -->
+          <span id="navRoleBadge" class="nav-role-badge">🎓 ผู้เรียน</span>
+          <select id="navRoleSwitcher" class="role-switcher-select" onchange="switchActiveRole(this.value)" title="สลับบทบาท">
+            <option value="learner">🎓 ผู้เรียน</option>
+            <option value="creator">👨‍🏫 ผู้สร้างบทเรียน</option>
+            <option id="navOptManager" value="manager" class="hidden" hidden>👔 ผู้จัดการ</option>
+          </select>
+
+          <!-- User Identity + Short Edit Button -->
+          <span id="navUserIdentity" class="nav-user-identity">👤 กำลังโหลด...</span>
+          <button id="btnEditProfile" class="btn btn-sm btn-wallet" onclick="openEditProfileModal()" title="แก้ไขชื่อ หน่วยงาน และรหัสผ่าน">
+            ✏️ แก้ไข
+          </button>
+          <button id="btnSyncMenu" class="btn btn-sm btn-wallet" onclick="openSyncModal()" title="ซิงค์ข้อมูลระหว่างเครื่อง (บทเรียน ใบประกาศ การเรียนรู้ สมาชิก)">
+            🔄 ซิงค์เครื่อง
+          </button>
+
+          <!-- Dynamic Role Action Buttons -->
+          <button id="btnCreatorNewLesson" class="btn btn-sm btn-primary hidden" onclick="openCreateLessonModal()">
+            ➕ สร้างบทเรียน
+          </button>
+          <button id="btnManagerMembersMenu" class="btn btn-sm btn-primary hidden" onclick="openMemberManagementModal()">
+            👥 จัดการสมาชิก
+          </button>
+          <button id="btnManagerLifecycleMenu" class="btn btn-sm btn-wallet hidden" onclick="openLifecycleModal()">
+            ⏳ อายุขัยบล็อก
+          </button>
+          <button id="btnGodVaultMenu" class="btn btn-sm hidden" style="background:linear-gradient(135deg,#1e1b4b,#312e81); color:#fde047; border:1px solid rgba(250,204,21,0.55); font-weight:700;" onclick="openGodVaultModal()">
+            ⚡ God Vault
+          </button>
+          <button id="btnManagerEmailReport" class="btn btn-sm btn-wallet hidden" onclick="emailManagerReport()">
+            📧 ส่งเมล
+          </button>
+
+          <!-- Logout Button -->
+          <button id="btnLogout" class="btn btn-sm btn-wallet" onclick="logoutUser()" title="ออกจากระบบ">
+            🚪 ออก
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="page">
+
+      <!-- ========================================================
+           PORTAL 1: 🎓 สำหรับผู้เรียน
+           ======================================================== -->
+      <div id="portalLearner" class="portal-view hidden">
+        <!-- ลำดับที่ 1: บทเรียนที่ได้รับมอบหมายจากผู้จัดการ -->
+        <section class="assigned-section card" style="margin-bottom: 1.25rem; border: 1px solid rgba(14,165,233,0.3);">
+          <div class="section-head-row">
+            <div>
+              <h2 class="section-title" style="color:var(--primary)">📌 บทเรียนที่ได้รับมอบหมายจากผู้จัดการ</h2>
+              <p class="section-desc">บทเรียนที่ผู้จัดการมอบหมายให้เข้าศึกษา เมื่อเรียนและสอบผ่านแล้วจะซ่อนจากรายการนี้โดยอัตโนมัติ</p>
+            </div>
+            <span class="badge badge-ok" id="assignedBadgeCount">0 บทเรียน</span>
+          </div>
+          <div id="assignedLessonsList" class="lesson-list" style="margin-top:1rem;">
+            <!-- Render from JS -->
+          </div>
+        </section>
+
+        <!-- ลำดับที่ 2: ค้นหาบทเรียน -->
+        <div class="search-card" style="margin-bottom: 1.25rem;">
+          <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="learnerSearchInput" class="search-input"
+                   placeholder="ค้นหาบทเรียน (พิมพ์ชื่อบทเรียน หรือคำอธิบาย)..."
+                   oninput="filterLearnerLessons()">
+          </div>
+        </div>
+
+        <!-- ลำดับที่ 3: บทเรียนทั้งหมดที่เปิดให้เรียน (แสดง 5 บทเรียนแนะนำ) -->
+        <section class="all-lessons-section">
+          <div class="section-head-row">
+            <div>
+              <h2 class="section-title">📚 บทเรียนทั้งหมดที่เปิดให้เรียน <span id="openLessonsSubtitleBadge" style="font-size:0.82rem; font-weight:500; color:var(--primary);">(5 บทเรียนแนะนำ)</span></h2>
+              <p class="section-desc">คัดสรร 5 บทเรียนแนะนำเพื่อความสะดวกในการเลือกเรียน</p>
+            </div>
+            <div class="lock-badge" id="openLessonsCountBadge" style="color:var(--accent); border-color:rgba(14,165,233,0.3)">📖 แนะนำ 5 บทเรียน</div>
+          </div>
+          <div id="openLessonsList" class="lesson-list">
+            <!-- Render from JS -->
+          </div>
+          <div id="openLessonsToggleWrap" class="hidden" style="text-align:center; margin-top:0.9rem;">
+            <button type="button" id="btnToggleAllOpenLessons" class="btn btn-sm btn-outline" onclick="toggleShowAllOpenLessons()">
+              🔽 ดูทั้งหมด
+            </button>
+          </div>
+        </section>
+
+        <!-- ลำดับที่ 4: สถิติการเรียนรู้บนบล็อกเชน -->
+        <section class="stats-card card" style="margin-top:2rem;">
+          <div class="section-head">
+            <div class="chain-badge">⛓️ บันทึกบนบล็อกเชน</div>
+            <h2 class="section-title">สถิติการเรียนรู้</h2>
+            <p class="section-desc">ข้อมูลการเข้าเรียน ผลการทดสอบ และสถิติที่บันทึกไว้ในระบบ</p>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-box">
+              <div class="stat-num" id="statLessons">0</div>
+              <div class="stat-label">บทเรียนที่สำเร็จแล้ว</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-num" id="statWatch">0 นาที</div>
+              <div class="stat-label">เวลาเรียนสะสม</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-num" id="statScore">0%</div>
+              <div class="stat-label">คะแนนเฉลี่ย</div>
+            </div>
+          </div>
+
+          <div class="tx-list-wrap">
+            <div class="tx-list-title">📋 ประวัติการบันทึกล่าสุด:</div>
+            <div id="txList" class="tx-list">
+              <div class="tx-empty">ยังไม่มีประวัติ — เริ่มทำแบบทดสอบเพื่อบันทึกผล</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- แถบลอยบนขวา (เรียงบน-ล่าง ยุบ-ขยายได้): วุฒิบัตรของฉัน + เลือกสีหน้าตา -->
+      <div class="floating-top-right">
+        <div id="btnLearnerCerts" class="floating-certs-wrap hidden">
+          <button type="button" id="floatingCertsMainBtn" class="floating-certs-main" onclick="onFloatingCertsClick()" title="เปิดดูและพิมพ์วุฒิบัตรของฉัน">
+            <span class="floating-certs-icon">🏅</span>
+            <span class="floating-certs-label">วุฒิบัตรของฉัน</span>
+            <span id="floatingCertCountBadge" class="floating-certs-badge">0</span>
+          </button>
+          <button type="button" id="floatingCertsToggleBtn" class="floating-certs-toggle" onclick="toggleFloatingCertsCollapse(event)" title="ยุบ / ขยายปุ่มวุฒิบัตร">
+            −
+          </button>
+        </div>
+
+        <div id="floatingThemeWrap" class="floating-theme-wrap">
+          <button type="button" class="floating-theme-icon-btn" onclick="onFloatingThemeIconClick()" title="ย่อ / ขยายตัวเลือกสีหน้าตา">🎨</button>
+          <select id="navThemeSwitcher" class="floating-theme-select" onchange="changeAppTheme(this.value)" title="เปลี่ยนธีมสีของระบบ">
+            <option value="theme-sky">🩵 ขาว-ฟ้าพาสเทล</option>
+            <option value="theme-pink">🌸 ขาว-ชมพูซากุระ</option>
+            <option value="theme-lavender">💜 ขาว-ม่วงลาเวนเดอร์</option>
+            <option value="theme-mint">🌿 ขาว-มิ้นต์พาสเทล</option>
+            <option value="theme-dark">🌙 โหมดมืด</option>
+          </select>
+          <button type="button" class="floating-theme-toggle" onclick="toggleFloatingThemeCollapse(event)" title="ยุบ / ขยายตัวเลือกสีหน้าตา">−</button>
+        </div>
+
+        <div id="floatingMenuWrap" class="floating-menu-wrap">
+          <button type="button" id="btnMobileNavToggle" class="floating-menu-main" onclick="onFloatingMenuClick()" title="เปิด / ปิดเมนูหลัก">
+            <span class="floating-menu-icon">☰</span>
+            <span id="floatingMenuLabel" class="floating-menu-label">เมนู</span>
+          </button>
+          <button type="button" class="floating-menu-toggle" onclick="toggleFloatingMenuCollapse(event)" title="ย่อ / ขยายปุ่มเมนู">−</button>
+        </div>
+      </div>
+
+      <!-- ========================================================
+           PORTAL 2: 👨‍🏫 สำหรับผู้สร้างบทเรียน
+           ======================================================== -->
+      <div id="portalCreator" class="portal-view hidden">
+        <!-- Creator Header & Stats -->
+        <div class="creator-banner">
+          <div class="creator-banner-left">
+            <span style="font-size:2rem">👨‍🏫</span>
+            <div>
+              <div class="creator-banner-title">ระบบจัดการสำหรับผู้สร้างบทเรียน</div>
+              <div class="creator-banner-sub">สร้างบทเรียนรายบท แก้ไข ซ่อน และตั้งวันเปิดให้เรียน</div>
+            </div>
+          </div>
+          <div class="creator-banner-actions">
+            <button class="btn btn-sm btn-primary" onclick="openCreateLessonModal()">
+              ➕ สร้างบทเรียน
+            </button>
+          </div>
+        </div>
+
+        <!-- Creator Metrics Grid -->
+        <div class="stats-grid" style="margin-bottom:1.5rem;">
+          <div class="stat-box">
+            <div class="stat-num" id="creatorTotalLessons">0</div>
+            <div class="stat-label">บทเรียนทั้งหมด</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num" id="creatorActiveLessons" style="color:#10b981">0</div>
+            <div class="stat-label">เปิดแสดงอยู่</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num" id="creatorHiddenLessons" style="color:#f59e0b">0</div>
+            <div class="stat-label">ซ่อนไว้</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num" id="creatorTotalDuration">0 นาที</div>
+            <div class="stat-label">เวลารวม</div>
+          </div>
+        </div>
+
+        <!-- List of Created Lessons -->
+        <section class="card">
+          <div class="section-head-row">
+            <div>
+              <h2 class="section-title">📚 บทเรียนที่สร้างไว้</h2>
+              <p class="section-desc">จัดการแก้ไข ลบ ซ่อน/แสดง หรือตั้งเวลาเปิดเรียน</p>
+            </div>
+          </div>
+          <div id="creatorLessonsList" class="lesson-list" style="margin-top:1rem;">
+            <!-- Render from JS -->
+          </div>
+        </section>
+      </div>
+
+      <!-- ========================================================
+           PORTAL 3: 👔 สำหรับผู้จัดการ
+           ======================================================== -->
+      <div id="portalManager" class="portal-view hidden">
+        <!-- Manager Top Banner with Add Manager Menu Button -->
+        <div class="creator-banner" style="margin-bottom: 1.25rem;">
+          <div class="creator-banner-left">
+            <span style="font-size:2rem">👔</span>
+            <div>
+              <div class="creator-banner-title" style="color:var(--primary)">ระบบบริหารจัดการสำหรับผู้จัดการ</div>
+              <div class="creator-banner-sub">มอบหมายบทเรียน ติดตามสถิติรายหน่วยงาน และจัดการสมาชิก</div>
+            </div>
+          </div>
+          <div class="creator-banner-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <button class="btn btn-sm btn-wallet" onclick="exportExpiredBlocks('csv', 'all')" title="สิทธิ์ผู้จัดการ: ส่งออกข้อมูลทั้งหมดเป็น CSV">
+              📊 Export CSV
+            </button>
+            <button class="btn btn-sm btn-wallet" onclick="exportExpiredBlocks('json', 'all')" title="สิทธิ์ผู้จัดการ: ส่งออกข้อมูลทั้งหมดเป็น JSON">
+              📦 Export JSON
+            </button>
+            <button class="btn btn-sm btn-wallet" onclick="openLifecycleModal()">
+              ⏳ อายุขัยบล็อก
+            </button>
+            <button class="btn btn-sm btn-primary" onclick="openMemberManagementModal()">
+              👥 จัดการสมาชิก
+            </button>
+            <button id="btnPortalGodVault" class="btn btn-sm hidden" style="background:linear-gradient(135deg,#1e1b4b,#312e81); color:#fde047; border:1px solid rgba(250,204,21,0.55); font-weight:700;" onclick="openGodVaultModal()">
+              ⚡ God Vault (Therunrock)
+            </button>
+          </div>
+        </div>
+
+        <!-- Search & Ward Filter Bar -->
+        <div class="search-card">
+          <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+            <div class="search-input-wrap" style="flex:1; min-width:240px;">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="managerSearchInput" class="search-input"
+                     placeholder="ค้นหาบทเรียน ชื่อผู้เรียน หรือหน่วยงาน..."
+                     oninput="filterManagerLessons()">
+            </div>
+            <div style="display:flex; align-items:center; gap:0.45rem;">
+              <label for="managerWardFilter" style="font-size:0.85rem; font-weight:600; color:var(--text); white-space:nowrap;">🏥 หน่วยงาน:</label>
+              <select id="managerWardFilter" class="role-switcher-select" style="padding:0.5rem 0.85rem; font-size:0.88rem; font-weight:600;" onchange="filterManagerLessons()">
+                <option value="">ทุกหน่วยงาน</option>
+                <option value="หอสงฆ์">🏥 หอสงฆ์</option>
+                <option value="สว.11">🏥 สว.11</option>
+                <option value="สว.12">🏥 สว.12</option>
+                <option value="8A">🏥 8A</option>
+                <option value="8B">🏥 8B</option>
+                <option value="9A">🏥 9A</option>
+                <option value="9B">🏥 9B</option>
+                <option value="9C">🏥 9C</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: บทเรียนทั้งหมด และการมอบหมายผู้เรียน -->
+        <section class="card" style="margin-bottom: 2rem;">
+          <div class="section-head-row">
+            <div>
+              <h2 class="section-title">👥 มอบหมายบทเรียน</h2>
+              <p class="section-desc">เลือกผู้เรียนรายบุคคลหรือมอบหมายยกหน่วยงาน</p>
+            </div>
+          </div>
+
+          <div id="managerLessonsList" style="margin-top: 1rem;">
+            <!-- Render from JS -->
+          </div>
+        </section>
+
+        <!-- Section: สถิติของแต่ละบทเรียน -->
+        <section class="card">
+          <div class="section-head-row">
+            <div>
+              <h2 class="section-title">📊 สถิติภาพรวมและรายหน่วยงาน</h2>
+              <p class="section-desc">กราฟและตารางสรุปเวลาเรียนรวม เฉลี่ย และร้อยละการสอบผ่านแยกตามหน่วยงานและรายบทเรียน</p>
+            </div>
+            <div class="section-actions">
+              <button class="btn btn-sm btn-wallet" onclick="printManagerReport()">
+                🖨️ พิมพ์รายงาน
+              </button>
+              <button class="btn btn-sm btn-primary" onclick="emailManagerReport()">
+                📧 ส่งเมล
+              </button>
+            </div>
+          </div>
+
+          <div id="managerReportContainer" style="margin-top: 1.25rem;">
+            <!-- Render KPI Overview, Visual Graphs & Summary Table from JS -->
+          </div>
+        </section>
+      </div>
+
+    </main>
+
+    <footer class="footer">
+      <p style="line-height:1.6;">
+        งานการพยาบาลผู้ป่วยพิเศษ 2-3 ฝ่ายการพยาบาล<br>
+        โรงพยาบาลศรีนครินทร์ คณะแพทยศาสตร์ มหาวิทยาลัยขอนแก่น
+      </p>
+    </footer>
+  </div>
+
+  <!-- ============================================================
+       MODALS
+       ============================================================ -->
+
+  <!-- ===== MODAL: เมนูแก้ไขข้อมูลส่วนตัว (ชื่อ-สกุล / หน่วยงาน / รหัสผ่าน) ===== -->
+  <div id="editProfileModal" class="modal-bg hidden" onclick="if(event.target===this)closeEditProfileModal()">
+    <div class="modal-box modal-box-sm">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">👤 ข้อมูลผู้ใช้</span>
+          <h3 class="modal-title">แก้ไขข้อมูลส่วนตัว</h3>
+        </div>
+        <button class="modal-close" onclick="closeEditProfileModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="guide-box" style="margin-bottom:1rem;">
+          <div class="guide-title">📌 ข้อมูลการเรียนผูกกับอีเมลของคุณ</div>
+          <div class="guide-desc">เปลี่ยน <strong>ชื่อ-นามสกุล</strong> และ <strong>หน่วยงาน</strong> ได้อิสระ โดยประวัติการเรียนและวุฒิบัตรยังคงอยู่ครบถ้วน</div>
+        </div>
+        <form id="editProfileForm" onsubmit="submitEditProfile(event)">
+          <div class="form-group">
+            <label class="form-label">อีเมลบัญชีผู้ใช้:</label>
+            <input type="text" id="profileEmailDisplay" class="form-input" readonly style="opacity:0.75; cursor:not-allowed;">
+          </div>
+          <div class="form-group">
+            <label class="form-label">ชื่อ - นามสกุล *:</label>
+            <input type="text" id="profileNameInput" class="form-input" placeholder="เช่น พว. กานดา สุขใจ" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">สังกัดหน่วยงาน *:</label>
+            <select id="profileWardInput" class="form-input" required>
+              <option value="หอสงฆ์">🏥 หอสงฆ์</option>
+              <option value="สว.11">🏥 สว.11</option>
+              <option value="สว.12">🏥 สว.12</option>
+              <option value="8A">🏥 8A</option>
+              <option value="8B">🏥 8B</option>
+              <option value="9A">🏥 9A</option>
+              <option value="9B">🏥 9B</option>
+              <option value="9C">🏥 9C</option>
+            </select>
+          </div>
+          <div class="form-grid-2" style="gap:0.6rem;">
+            <div class="form-group">
+              <label class="form-label">เปลี่ยนรหัสผ่านใหม่:</label>
+              <input type="password" id="profilePasswordInput" class="form-input" placeholder="เว้นว่างหากไม่เปลี่ยน" minlength="4">
+            </div>
+            <div class="form-group">
+              <label class="form-label">ยืนยันรหัสผ่านใหม่:</label>
+              <input type="password" id="profilePasswordConfirmInput" class="form-input" placeholder="กรอกรหัสผ่านใหม่อีกครั้ง" minlength="4">
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.25rem;">
+            <button type="button" class="btn btn-wallet" onclick="closeEditProfileModal()">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary">💾 บันทึก</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: เมนูเพิ่มผู้จัดการ ===== -->
+  <div id="addManagerModal" class="modal-bg hidden" onclick="if(event.target===this)closeAddManagerModal()">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">👔 สิทธิ์ผู้จัดการ</span>
+          <h3 class="modal-title">เพิ่มผู้จัดการ</h3>
+        </div>
+        <button class="modal-close" onclick="closeAddManagerModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:82vh; overflow-y:auto;">
+        <div class="guide-box" style="margin-bottom:1.1rem;">
+          <div class="guide-title">🔒 สิทธิ์ผู้จัดการจะไม่แสดงกับคนทั่วไป</div>
+          <div class="guide-desc">มีเพียงผู้จัดการเท่านั้นที่สามารถเพิ่มผู้จัดการใหม่ได้ โดยเลือกจากรายชื่อ <strong>"👨‍🏫 ผู้สร้างบทเรียน"</strong> ด้านล่าง</div>
+        </div>
+
+        <!-- Quick Select Dropdown Form -->
+        <div style="background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:1rem; margin-bottom:1.25rem;">
+          <label class="form-label" style="margin-bottom:0.45rem; display:block;">เลือกผู้สร้างบทเรียนเพื่อเพิ่มเป็นผู้จัดการ:</label>
+          <div style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center;">
+            <select id="selectCreatorForManager" class="form-input" style="flex:1; min-width:240px;">
+              <option value="">-- กำลังโหลดรายชื่อผู้สร้างบทเรียน --</option>
+            </select>
+            <button type="button" class="btn btn-primary" onclick="promoteSelectedCreatorToManager()">
+              👔➕ เพิ่ม
+            </button>
+          </div>
+        </div>
+
+        <!-- Creator Candidates List -->
+        <div style="margin-bottom:1.4rem;">
+          <h4 style="font-size:0.95rem; font-weight:700; margin-bottom:0.6rem; color:var(--text);">👨‍🏫 รายชื่อผู้สร้างบทเรียนทั้งหมด</h4>
+          <div id="creatorCandidatesList" style="display:flex; flex-direction:column; gap:0.55rem;">
+            <!-- Render from JS -->
+          </div>
+        </div>
+
+        <!-- Current Managers List -->
+        <div>
+          <h4 style="font-size:0.95rem; font-weight:700; margin-bottom:0.6rem; color:var(--text);">👔 รายชื่อผู้จัดการปัจจุบัน</h4>
+          <div id="currentManagersList" style="display:flex; flex-direction:column; gap:0.55rem;">
+            <!-- Render from JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: วุฒิบัตรของฉัน ===== -->
+  <div id="myCertificatesModal" class="modal-bg hidden" onclick="if(event.target===this)closeMyCertificatesModal()">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge" style="background:rgba(234,179,8,0.15); color:#facc15; border-color:rgba(234,179,8,0.3)">🏅 วุฒิบัตร</span>
+          <h3 class="modal-title">วุฒิบัตรของฉัน</h3>
+        </div>
+        <button class="modal-close" onclick="closeMyCertificatesModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:80vh; overflow-y:auto;">
+        <div id="myCertsTabBar" style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap;">
+          <button type="button" id="btnCertTabActive" class="btn btn-sm btn-primary" onclick="switchMyCertificatesTab('active')">
+            🏅 วุฒิบัตรปัจจุบัน (<span id="certActiveCount">0</span>)
+          </button>
+          <button type="button" id="btnCertTabOld" class="btn btn-sm btn-wallet" onclick="switchMyCertificatesTab('old')">
+            🗂️ วุฒิบัตรเก่า (<span id="certOldCount">0</span>)
+          </button>
+        </div>
+        <div id="myCertificatesList" class="cert-grid">
+          <!-- Render from JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: แก้ไขบทเรียน ===== -->
+  <div id="editLessonModal" class="modal-bg hidden" onclick="if(event.target===this)closeEditLessonModal()">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">✏️ แก้ไข</span>
+          <h3 class="modal-title" id="editLessonModalTitle">แก้ไขบทเรียน</h3>
+        </div>
+        <button class="modal-close" onclick="closeEditLessonModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height:80vh; overflow-y:auto;">
+        <form id="editLessonForm" onsubmit="submitEditLesson(event)">
+          <input type="hidden" id="editLessonId">
+          <div class="form-group">
+            <label class="form-label">ชื่อบทเรียน *:</label>
+            <input type="text" id="editLessonTitle" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">เนื้อหาย่อ:</label>
+            <textarea id="editLessonSummary" class="form-input form-textarea" rows="2"></textarea>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">ลิงก์วิดีโอ YouTube *:</label>
+              <input type="text" id="editLessonYoutube" class="form-input" required>
+            </div>
+            <div class="form-grid-2" style="gap:0.5rem;">
+              <div class="form-group">
+                <label class="form-label">ชั่วโมงบนใบประกาศ (ชม.) *:</label>
+                <input type="number" id="editLessonStudyHours" class="form-input" min="0.5" step="0.5" value="1" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">เวลาดูขั้นต่ำ (วินาที) *:</label>
+                <input type="number" id="editLessonDuration" class="form-input" min="5" required>
+              </div>
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">ลิงก์ภาพหน้าปก:</label>
+              <div style="display:flex; gap:0.4rem; align-items:center;">
+                <input type="text" id="editLessonThumbnail" class="form-input" style="flex:1;">
+                <input type="file" id="editCoverFile" accept="image/*" class="hidden" onchange="uploadLessonCover('editCoverFile', 'editLessonThumbnail', 'editCoverStatus')">
+                <button type="button" class="btn btn-sm btn-doc" onclick="document.getElementById('editCoverFile').click()">📤 อัปโหลด</button>
+              </div>
+              <span id="editCoverStatus" class="form-hint"></span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">ลิงก์เอกสารประกอบ:</label>
+              <input type="text" id="editLessonDocument" class="form-input">
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">เปิดให้เรียนถึงวันที่:</label>
+              <div style="display:flex; gap:0.4rem; margin-bottom:0.4rem; flex-wrap:wrap;">
+                <input type="date" id="editDatePicker" class="form-input" style="flex:1; min-width:130px;" onchange="applyDateTimeToField('editDatePicker','editTimePicker','editLessonOpenPeriod')">
+                <input type="time" id="editTimePicker" class="form-input" value="10:00" style="width:110px;" onchange="applyDateTimeToField('editDatePicker','editTimePicker','editLessonOpenPeriod')">
+                <button type="button" class="btn btn-sm btn-wallet" onclick="document.getElementById('editLessonOpenPeriod').value='เปิดตลอดเวลา'">♾️ เปิดตลอด</button>
+              </div>
+              <input type="text" id="editLessonOpenPeriod" class="form-input" placeholder="เช่น 10 ธันวาคม 2569 10.00 น. หรือ เปิดตลอดเวลา">
+            </div>
+            <div class="form-group">
+              <label class="form-label">การแสดงผล:</label>
+              <select id="editLessonIsHidden" class="form-input">
+                <option value="false">👁️ แสดงบทเรียน</option>
+                <option value="true">🙈 ซ่อนบทเรียน</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">🎯 เกณฑ์คะแนนผ่านได้ใบประกาศ (%):</label>
+              <input type="number" id="editLessonPassScore" class="form-input" min="1" max="100" value="70" required>
+            </div>
+            <div class="form-group" style="display:flex; flex-direction:column; justify-content:flex-end; gap:0.25rem;">
+              <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; color:var(--text); cursor:pointer;">
+                <input type="checkbox" id="editLessonDisablePreTest">
+                <span>ไม่มี Pre-test</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; color:var(--text); cursor:pointer;">
+                <input type="checkbox" id="editLessonDisablePostTest">
+                <span>ไม่มี Post-test</span>
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer-sticky">
+            <button type="button" class="btn btn-wallet" onclick="closeEditLessonModal()">ยกเลิก</button>
+            <button type="submit" id="btnSaveEditLesson" class="btn btn-primary" style="flex:1">💾 บันทึก</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: กำหนดวันเปิดให้เรียน ===== -->
+  <div id="scheduleModal" class="modal-bg hidden" onclick="if(event.target===this)closeScheduleModal()">
+    <div class="modal-box modal-box-sm">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">⏰ ตั้งเวลา</span>
+          <h3 class="modal-title">เปิดให้เรียนถึงวันที่</h3>
+        </div>
+        <button class="modal-close" onclick="closeScheduleModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="scheduleForm" onsubmit="submitSchedule(event)">
+          <input type="hidden" id="scheduleLessonId">
+          <div class="form-group">
+            <label class="form-label">1. เลือกเปิดให้เรียนถึงวันที่และเวลา:</label>
+            <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem; flex-wrap:wrap;">
+              <input type="date" id="scheduleDatePicker" class="form-input" style="flex:1; min-width:140px;" onchange="applyDateTimeToField('scheduleDatePicker','scheduleTimePicker','inputSchedulePeriod')">
+              <input type="time" id="scheduleTimePicker" class="form-input" value="10:00" style="width:120px;" onchange="applyDateTimeToField('scheduleDatePicker','scheduleTimePicker','inputSchedulePeriod')">
+              <button type="button" class="btn btn-sm btn-wallet" onclick="document.getElementById('inputSchedulePeriod').value='เปิดตลอดเวลา'">♾️ เปิดตลอด</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">2. เปิดให้เรียนถึงวันที่ (พ.ศ.):</label>
+            <input type="text" id="inputSchedulePeriod" class="form-input" placeholder="เช่น 10 ธันวาคม 2569 10.00 น." required>
+            <span class="form-hint">เลือกจากปฏิทินด้านบน ระบบจะแปลงเป็น พ.ศ. อัตโนมัติ</span>
+          </div>
+          <div class="modal-footer-sticky" style="margin-top:1rem;">
+            <button type="button" class="btn btn-wallet" onclick="closeScheduleModal()">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary" style="flex:1">💾 บันทึก</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: หน้าต่างบทเรียน ===== -->
+  <div id="lessonModal" class="modal-bg hidden" onclick="onModalBgClick(event)">
+    <div class="modal-box">
+      <!-- Modal Header -->
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span id="modalBadge" class="lesson-badge">บทที่ 1</span>
+          <h3 id="modalTitle" class="modal-title">ชื่อบทเรียน</h3>
+        </div>
+        <button class="modal-close" onclick="closeModal()" aria-label="ปิด">✕</button>
+      </div>
+
+      <!-- ข้อมูลสาธารณะจากผู้สร้าง -->
+      <div class="modal-public-bar">
+        <p id="modalSummary" class="modal-summary">เนื้อหาย่อของบทเรียน...</p>
+        <div class="modal-links">
+          <a id="modalDocLink" class="btn btn-sm btn-doc" href="#" target="_blank" rel="noopener" style="display:none">
+            📄 เอกสารประกอบ
+          </a>
+          <span id="modalTimeBadge" class="time-badge">⏱️ เวลาเรียนขั้นต่ำ: --:--</span>
+        </div>
+      </div>
+
+      <!-- Tabs: 3 ขั้นตอน -->
+      <div class="modal-tabs">
+        <button id="tabPre" class="tab-btn active" onclick="switchTab('pre')">
+          <span class="tab-num">1</span>
+          <span class="tab-text">ก่อนเรียน</span>
+        </button>
+        <button id="tabVideo" class="tab-btn" onclick="switchTab('video')">
+          <span class="tab-num">2</span>
+          <span class="tab-text">วิดีโอ</span>
+        </button>
+        <button id="tabPost" class="tab-btn" onclick="switchTab('post')">
+          <span class="tab-num">3</span>
+          <span id="postTabText" class="tab-text">หลังเรียน 🔒</span>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="modal-body">
+        <!-- Tab 1: Pre-test -->
+        <div id="viewPre" class="tab-panel">
+          <div class="guide-box">
+            <div class="guide-title">📝 แบบทดสอบก่อนเรียน</div>
+            <p class="guide-desc">ประเมินความรู้เบื้องต้นก่อนเข้าชมวิดีโอ</p>
+          </div>
+          <div id="preQuizArea" class="quiz-area"></div>
+        </div>
+
+        <!-- Tab 2: วิดีโอ + จับเวลา -->
+        <div id="viewVideo" class="tab-panel hidden">
+          <div class="video-wrap">
+            <div class="yt-player-wrap">
+              <div id="ytPlayer"></div>
+            </div>
+
+            <div class="timer-box">
+              <div class="timer-row">
+                <div>
+                  <div class="timer-label">⏱️ เวลาเรียนสะสมในบทนี้:</div>
+                  <div class="timer-clock">
+                    <span id="timeCurrent">00:00</span> / <span id="timeRequired">01:00</span>
+                  </div>
+                </div>
+                <span id="timerPill" class="timer-pill pending">⏳ ยังไม่ถึงเวลาที่กำหนด</span>
+              </div>
+              <div class="progress-track" style="margin-top:0.5rem">
+                <div id="videoBar" class="progress-fill" style="width:0%"></div>
+              </div>
+
+              <div class="sim-row" style="margin-top: 1rem;">
+                <button id="playBtn" class="btn btn-play" onclick="togglePlay()" style="width: 100%; font-size: 1rem; padding: 0.75rem;">
+                  ▶ เล่นวิดีโอและเริ่มจับเวลา
+                </button>
+              </div>
+
+              <div id="skipWarn" class="skip-warn hidden">
+                ⚠️ กรุณาเรียนตามเวลาที่กำหนด
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Post-test -->
+        <div id="viewPost" class="tab-panel hidden">
+          <div id="postLocked" class="locked-notice hidden">
+            <div class="locked-icon">🔒</div>
+            <h4>แบบทดสอบหลังเรียนยังไม่เปิด</h4>
+            <p>ผู้สร้างบทเรียนกำหนดให้ต้องเรียนอย่างน้อย <strong id="lockedReq">--:--</strong></p>
+            <p>เรียนไปแล้ว: <span id="lockedCur" class="locked-cur">00:00</span></p>
+            <button class="btn btn-primary" style="margin-top:1rem" onclick="switchTab('video')">
+              ▶ กลับไปดูวิดีโอ
+            </button>
+          </div>
+
+          <div id="postActive">
+            <div class="guide-box">
+              <div class="guide-title">🎯 แบบทดสอบหลังเรียน</div>
+              <p class="guide-desc">ทำข้อสอบให้ผ่านเกณฑ์ 70% เพื่อรับวุฒิบัตร</p>
+            </div>
+            <div id="postQuizArea" class="quiz-area"></div>
+          </div>
+        </div>
+
+        <!-- Learner 1-5 Star Lesson Rating Widget (Anonymous) -->
+        <div id="lessonRatingWidget" style="margin-top:1.1rem; padding:0.85rem 1rem; background:var(--card2); border:1px solid var(--border); border-radius:12px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.6rem;">
+          <div>
+            <div style="font-size:0.86rem; font-weight:700; color:var(--text);">⭐ ให้คะแนนความพึงพอใจบทเรียนนี้ (ไม่ระบุตัวตน)</div>
+            <div id="lessonRatingSummaryText" style="font-size:0.76rem; color:var(--muted);">คะแนนเฉลี่ย: -</div>
+          </div>
+          <div id="lessonRatingStars" style="display:flex; align-items:center; gap:0.35rem;">
+            <button type="button" class="btn btn-sm btn-wallet" onclick="submitLessonRating(1)" data-star="1" style="font-size:1.1rem; padding:0.25rem 0.5rem;">☆</button>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="submitLessonRating(2)" data-star="2" style="font-size:1.1rem; padding:0.25rem 0.5rem;">☆</button>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="submitLessonRating(3)" data-star="3" style="font-size:1.1rem; padding:0.25rem 0.5rem;">☆</button>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="submitLessonRating(4)" data-star="4" style="font-size:1.1rem; padding:0.25rem 0.5rem;">☆</button>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="submitLessonRating(5)" data-star="5" style="font-size:1.1rem; padding:0.25rem 0.5rem;">☆</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: ผู้สร้างแทรกบทเรียนใหม่ ===== -->
+  <div id="createLessonModal" class="modal-bg hidden" onclick="if(event.target===this)closeCreateLessonModal()">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge" style="background:rgba(14,165,233,0.15); color:#38bdf8; border-color:rgba(14,165,233,0.3)">👨‍🏫 สร้างบทเรียน</span>
+          <h3 class="modal-title">สร้างบทเรียนใหม่</h3>
+        </div>
+        <button class="modal-close" onclick="closeCreateLessonModal()">✕</button>
+      </div>
+
+      <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
+        <form id="createLessonForm" onsubmit="submitNewLesson(event)">
+          <div class="creator-form-section">
+            <h4 class="creator-sec-title">📌 1. ข้อมูลบทเรียน</h4>
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">ชื่อผู้สร้างบทเรียน:</label>
+                <input type="text" id="newCreatorName" class="form-input" placeholder="เช่น พว. กานดา สุขใจ">
+              </div>
+              <div class="form-group">
+                <label class="form-label">ลำดับบทเรียน:</label>
+                <input type="number" id="newSortOrder" class="form-input" min="1">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">ชื่อบทเรียน *:</label>
+              <input type="text" id="newLessonTitle" class="form-input" placeholder="เช่น บทที่ 1: การดูแลผู้ป่วย..." required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">เนื้อหาย่อ:</label>
+              <textarea id="newLessonSummary" class="form-input form-textarea" rows="2" placeholder="อธิบายสาระสำคัญย่อๆ..."></textarea>
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">ลิงก์วิดีโอ YouTube *:</label>
+                <input type="text" id="newYoutubeURL" class="form-input" placeholder="https://www.youtube.com/watch?v=..." required>
+              </div>
+              <div class="form-grid-2" style="gap:0.5rem;">
+                <div class="form-group">
+                  <label class="form-label">ชั่วโมงบนใบประกาศ (ชม.) *:</label>
+                  <input type="number" id="newStudyHours" class="form-input" value="1" min="0.5" step="0.5" required>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">เวลาดูขั้นต่ำ (วินาที) *:</label>
+                  <input type="number" id="newDurationSec" class="form-input" value="60" min="5" required>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">ลิงก์ภาพหน้าปก:</label>
+                <div style="display:flex; gap:0.4rem; align-items:center;">
+                  <input type="text" id="newThumbnailURL" class="form-input" placeholder="https://... หรืออัปโหลดภาพ" style="flex:1;">
+                  <input type="file" id="newCoverFile" accept="image/*" class="hidden" onchange="uploadLessonCover('newCoverFile', 'newThumbnailURL', 'newCoverStatus')">
+                  <button type="button" class="btn btn-sm btn-doc" onclick="document.getElementById('newCoverFile').click()">📤 อัปโหลด</button>
+                </div>
+                <span id="newCoverStatus" class="form-hint"></span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">เปิดให้เรียนถึงวันที่:</label>
+                <div style="display:flex; gap:0.4rem; margin-bottom:0.4rem; flex-wrap:wrap;">
+                  <input type="date" id="newDatePicker" class="form-input" style="flex:1; min-width:130px;" onchange="applyDateTimeToField('newDatePicker','newTimePicker','newOpenPeriod')">
+                  <input type="time" id="newTimePicker" class="form-input" value="10:00" style="width:110px;" onchange="applyDateTimeToField('newDatePicker','newTimePicker','newOpenPeriod')">
+                  <button type="button" class="btn btn-sm btn-wallet" onclick="document.getElementById('newOpenPeriod').value='เปิดตลอดเวลา'">♾️ เปิดตลอด</button>
+                </div>
+                <input type="text" id="newOpenPeriod" class="form-input" value="เปิดตลอดเวลา" placeholder="เช่น 10 ธันวาคม 2569 10.00 น. หรือ เปิดตลอดเวลา">
+              </div>
+              <div class="form-group">
+                <label class="form-label">🎯 เกณฑ์คะแนนผ่านเพื่อรับใบประกาศ (%):</label>
+                <input type="number" id="newPassScorePct" class="form-input" min="1" max="100" value="70" required>
+              </div>
+            </div>
+          </div>
+
+          <!-- แบบทดสอบก่อนเรียน -->
+          <div class="creator-form-section">
+            <div class="sec-hdr-row" style="flex-wrap:wrap; gap:0.5rem;">
+              <div style="display:flex; align-items:center; gap:0.65rem; flex-wrap:wrap;">
+                <h4 class="creator-sec-title">📝 2. แบบทดสอบก่อนเรียน</h4>
+                <label style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; color:var(--primary); cursor:pointer;">
+                  <input type="checkbox" id="newHasPreTest" checked onchange="toggleCreatePreTestSection()">
+                  <span>มี Pre-test</span>
+                </label>
+              </div>
+              <button type="button" id="btnAddPreQuestion" class="btn btn-sm btn-doc" onclick="addQuestionField('pre')">+ เพิ่มข้อสอบ</button>
+            </div>
+            <div id="preQuestionsContainer" class="questions-builder"></div>
+          </div>
+
+          <!-- แบบทดสอบหลังเรียน -->
+          <div class="creator-form-section">
+            <div class="sec-hdr-row" style="flex-wrap:wrap; gap:0.5rem;">
+              <div style="display:flex; align-items:center; gap:0.65rem; flex-wrap:wrap;">
+                <h4 class="creator-sec-title">🎯 3. แบบทดสอบหลังเรียน</h4>
+                <label style="display:flex; align-items:center; gap:0.35rem; font-size:0.8rem; color:var(--primary); cursor:pointer;">
+                  <input type="checkbox" id="newHasPostTest" checked onchange="toggleCreatePostTestSection()">
+                  <span>มี Post-test</span>
+                </label>
+              </div>
+              <button type="button" id="btnAddPostQuestion" class="btn btn-sm btn-doc" onclick="addQuestionField('post')">+ เพิ่มข้อสอบ</button>
+            </div>
+            <div id="postQuestionsContainer" class="questions-builder"></div>
+          </div>
+
+          <div class="modal-footer-sticky">
+            <button type="button" class="btn btn-wallet" onclick="closeCreateLessonModal()">ยกเลิก</button>
+            <button type="submit" id="submitLessonBtn" class="btn btn-mint" style="flex:1">
+              💾 บันทึกบทเรียน
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: ระบบอายุขัยของบล็อก (Block Lifecycle & Self-Destruct) ===== -->
+  <div id="lifecycleModal" class="modal-bg hidden" onclick="if(event.target===this)closeLifecycleModal()">
+    <div class="modal-box" style="max-width:860px; width:96%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">⏳ Block Lifecycle</span>
+          <h3 class="modal-title">ระบบอายุขัยของบล็อก & การเก็บถาวร (Archive / Self-Destruct)</h3>
+        </div>
+        <button class="modal-close" onclick="closeLifecycleModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:0.9rem; max-height:82vh; overflow-y:auto;">
+
+        <!-- 4 Stage Legend -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(185px, 1fr)); gap:0.55rem;">
+          <div style="background:rgba(14,165,233,0.1); border:1px solid rgba(14,165,233,0.35); border-radius:10px; padding:0.65rem 0.75rem;">
+            <div style="font-size:0.78rem; font-weight:700; color:#0284c7;">✨ THE SILENT SPARK</div>
+            <div style="font-size:0.74rem; font-weight:700; color:var(--text);">GENESIS (Day 0 – เดือนที่ 2)</div>
+            <div id="lcCount_GENESIS" style="font-size:0.75rem; color:var(--muted); margin-top:0.2rem;">0 บล็อก</div>
+          </div>
+          <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.35); border-radius:10px; padding:0.65rem 0.75rem;">
+            <div style="font-size:0.78rem; font-weight:700; color:#059669;">🌟 PEAK RADIANCE</div>
+            <div style="font-size:0.74rem; font-weight:700; color:var(--text);">FLOURISHING (เดือนที่ 3 – 18)</div>
+            <div id="lcCount_FLOURISHING" style="font-size:0.75rem; color:var(--muted); margin-top:0.2rem;">0 บล็อก</div>
+          </div>
+          <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); border-radius:10px; padding:0.65rem 0.75rem;">
+            <div style="font-size:0.78rem; font-weight:700; color:#d97706;">🌆 VELVET TWILIGHT</div>
+            <div style="font-size:0.74rem; font-weight:700; color:var(--text);">SUNSETTING (เดือนที่ 19 – 23)</div>
+            <div id="lcCount_SUNSETTING" style="font-size:0.75rem; color:var(--muted); margin-top:0.2rem;">0 บล็อก (Freeze)</div>
+          </div>
+          <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.35); border-radius:10px; padding:0.65rem 0.75rem;">
+            <div style="font-size:0.78rem; font-weight:700; color:#dc2626;">💨 ASHES TO ETHER</div>
+            <div style="font-size:0.74rem; font-weight:700; color:var(--text);">DISSOLVED (ครบ 2 ปี / Day 730)</div>
+            <div id="lcCount_DISSOLVED" style="font-size:0.75rem; color:var(--muted); margin-top:0.2rem;">0 บล็อก (หมดอายุ)</div>
+          </div>
+        </div>
+
+        <!-- Archive Recommendation & Actions for Expired Blocks -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.85rem 1rem;">
+          <div style="font-size:0.86rem; font-weight:700; color:var(--text); margin-bottom:0.35rem;">
+            📦 จัดการบล็อกที่หมดอายุ (DISSOLVED — ไม่แสดงและไม่คำนวณในสถิติแล้ว)
+          </div>
+          <div style="font-size:0.78rem; color:var(--muted); line-height:1.55; margin-bottom:0.65rem;">
+            • <strong>📊 CSV (แนะนำสำหรับรายงาน &amp; Excel):</strong> เปิดดูใน Microsoft Excel / Google Sheets ได้ทันที แสดงรายชื่อผู้เรียน คะแนน เวลาเรียน และใบประกาศเป็นภาษาไทยชัดเจน<br>
+            • <strong>📦 JSON (แนะนำสำหรับสำรองข้อมูลระบบ):</strong> เก็บโครงสร้างข้อมูลครบ 100% ทั้งข้อสอบ ตัวเลือก และ Hash บล็อกเชน
+          </div>
+          <div style="display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center;">
+            <button type="button" class="btn btn-sm btn-wallet" onclick="exportExpiredBlocks('csv', 'expired')">
+              📊 Export CSV (หมดอายุ)
+            </button>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="exportExpiredBlocks('json', 'expired')">
+              📦 Export JSON (หมดอายุ)
+            </button>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="exportExpiredBlocks('csv', 'all')">
+              📊 Export CSV (ทั้งหมด)
+            </button>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="exportExpiredBlocks('json', 'all')">
+              📦 Export JSON (ทั้งหมด)
+            </button>
+            <button type="button" id="btnPurgeExpired" class="btn btn-sm" style="background:rgba(239,68,68,0.14); color:#dc2626; border:1px solid rgba(239,68,68,0.45); font-weight:700;" onclick="purgeExpiredBlocks()">
+              💥 Self-Destruct (ลบถาวรจากระบบ)
+            </button>
+          </div>
+        </div>
+
+        <!-- Block List -->
+        <div id="lifecycleBlockList" style="display:flex; flex-direction:column; gap:0.65rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: สถิติผู้เรียนรายบุคคลในบทเรียน (Lazy Load) ===== -->
+  <div id="lessonLearnersModal" class="modal-bg hidden" onclick="if(event.target===this)closeLessonLearnersModal()">
+    <div class="modal-box" style="max-width:860px; width:96%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">👥 สถิติผู้เรียนรายบุคคล</span>
+          <h3 id="lessonLearnersModalTitle" class="modal-title">กำลังโหลด...</h3>
+        </div>
+        <button class="modal-close" onclick="closeLessonLearnersModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:0.75rem; max-height:80vh; overflow-y:auto;">
+        <div style="display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+          <input type="text" id="lessonLearnersSearchInput" class="form-input" style="flex:1; min-width:210px;" placeholder="🔍 ค้นหาชื่อผู้เรียน อีเมล หรือหน่วยงาน..." oninput="renderLessonLearnersList()">
+          <span id="lessonLearnersSummaryBadge" class="badge badge-ok" style="font-size:0.78rem;">-</span>
+        </div>
+        <div id="lessonLearnersRatingSummary" style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.75rem 0.9rem;"></div>
+        <div id="lessonLearnersBody" style="display:flex; flex-direction:column; gap:0.5rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: สถิติคะแนนบทเรียน 1-5 ดาว (ไม่ระบุตัวตน - ผู้สร้าง & ผู้จัดการ) ===== -->
+  <div id="lessonRatingsModal" class="modal-bg hidden" onclick="if(event.target===this)closeLessonRatingsModal()">
+    <div class="modal-box" style="max-width:560px; width:96%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">⭐ สถิติคะแนนความพึงพอใจ</span>
+          <h3 id="lessonRatingsModalTitle" class="modal-title">กำลังโหลด...</h3>
+        </div>
+        <button class="modal-close" onclick="closeLessonRatingsModal()">✕</button>
+      </div>
+      <div class="modal-body" id="lessonRatingsModalBody" style="display:flex; flex-direction:column; gap:0.75rem;">
+        <div style="text-align:center; padding:1.5rem; color:var(--muted);">⏳ กำลังโหลดสถิติคะแนน...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: สถิติผู้เรียนรายบุคคลในหน่วยงาน (Lazy Load) ===== -->
+  <div id="wardLearnersModal" class="modal-bg hidden" onclick="if(event.target===this)closeWardLearnersModal()">
+    <div class="modal-box" style="max-width:900px; width:96%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">🏥 สถิติรายหน่วยงาน</span>
+          <h3 id="wardLearnersModalTitle" class="modal-title">กำลังโหลด...</h3>
+        </div>
+        <button class="modal-close" onclick="closeWardLearnersModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:0.75rem; max-height:82vh; overflow-y:auto;">
+        <div style="display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+          <input type="text" id="wardLearnersSearchInput" class="form-input" style="flex:1; min-width:210px;" placeholder="🔍 ค้นหาชื่อบุคลากร หรือชื่อบทเรียน..." oninput="renderWardLearnersList()">
+          <select id="wardLearnersStatusFilter" class="form-input" style="width:auto; min-width:155px;" onchange="renderWardLearnersList()">
+            <option value="">📋 สถานะทั้งหมด</option>
+            <option value="completed">✅ เรียนจบแล้ว</option>
+            <option value="in_progress">⏳ กำลังเรียน</option>
+            <option value="not_started">📌 ยังไม่เริ่ม</option>
+          </select>
+          <span id="wardLearnersSummaryBadge" class="badge badge-ok" style="font-size:0.78rem;">-</span>
+        </div>
+        <div id="wardLearnersBody" style="display:flex; flex-direction:column; gap:0.65rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: GOD THERUNROCK EXCLUSIVE VAULT & CHAIN CONTROL ===== -->
+  <div id="godVaultModal" class="modal-bg hidden" onclick="if(event.target===this)closeGodVaultModal()">
+    <div class="modal-box" style="max-width:960px; width:96%; background:linear-gradient(160deg,#0f172a 0%,#1e1b4b 55%,#111827 100%); color:#f8fafc; border:1px solid rgba(250,204,21,0.45); box-shadow:0 25px 60px rgba(0,0,0,0.65);">
+      <div class="modal-hdr" style="border-bottom:1px solid rgba(250,204,21,0.25);">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge" style="background:rgba(250,204,21,0.18); color:#fde047; border:1px solid rgba(250,204,21,0.45);">⚡ GODESS SANCTUM</span>
+          <h3 class="modal-title" style="color:#fef08a;">God Therunrock — Ethereal Vault &amp; Chain Control</h3>
+        </div>
+        <button class="modal-close" style="color:#fde047;" onclick="closeGodVaultModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:0.95rem; max-height:84vh; overflow-y:auto;">
+
+        <!-- Chain Metrics Banner -->
+        <div id="godVaultMetrics" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr)); gap:0.55rem;">
+          <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(250,204,21,0.2); border-radius:10px; padding:0.6rem 0.75rem;">
+            <div style="font-size:0.7rem; color:#cbd5e1;">💾 ขนาดฐานข้อมูล</div>
+            <div id="gvDbSize" style="font-size:1rem; font-weight:700; color:#fde047;">-</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(129,140,248,0.25); border-radius:10px; padding:0.6rem 0.75rem;">
+            <div style="font-size:0.7rem; color:#cbd5e1;">📚 บทเรียน Active</div>
+            <div id="gvLessonsCount" style="font-size:1rem; font-weight:700; color:#a5b4fc;">-</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(52,211,153,0.25); border-radius:10px; padding:0.6rem 0.75rem;">
+            <div style="font-size:0.7rem; color:#cbd5e1;">🪞 Snapshots</div>
+            <div id="gvSnapCount" style="font-size:1rem; font-weight:700; color:#6ee7b7;">-</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(56,189,248,0.25); border-radius:10px; padding:0.6rem 0.75rem;">
+            <div style="font-size:0.7rem; color:#cbd5e1;">🏛️ Cold Offloads</div>
+            <div id="gvOffloadCount" style="font-size:1rem; font-weight:700; color:#7dd3fc;">-</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(244,114,182,0.25); border-radius:10px; padding:0.6rem 0.75rem;">
+            <div style="font-size:0.7rem; color:#cbd5e1;">💎 Distilled Proofs</div>
+            <div id="gvDistillCount" style="font-size:1rem; font-weight:700; color:#f9a8d4;">-</div>
+          </div>
+        </div>
+
+        <!-- 7 God Systems Grid -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(275px, 1fr)); gap:0.75rem;">
+
+          <!-- 1. ETHEREAL VAULT — COLD OFFLOAD -->
+          <div style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.35); border-radius:12px; padding:0.85rem; display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="font-size:0.86rem; font-weight:700; color:#7dd3fc;">🏛️ ETHEREAL VAULT — COLD OFFLOAD</div>
+            <div style="font-size:0.74rem; color:#cbd5e1; line-height:1.45;">ย้ายข้อมูลส่วนเกินไปเก็บรักษาในห้องนิรภัยนอกเชน (Off-chain Storage) ก่อนหมดอายุ เพื่อลดภาระให้เครือข่ายหลักทำงานเต็มสปีด</div>
+            <select id="gvOffloadLessonSelect" class="form-input" style="background:#0f172a; color:#f8fafc; border-color:rgba(56,189,248,0.4); font-size:0.78rem;"></select>
+            <button type="button" class="btn btn-sm" style="background:#0284c7; color:#fff; font-weight:700;" onclick="godColdOffload()">🏛️ COLD OFFLOAD (ย้ายออกนอกเชน)</button>
+          </div>
+
+          <!-- 2. ECHO RECALL — STATE REHYDRATE -->
+          <div style="background:rgba(167,139,250,0.08); border:1px solid rgba(167,139,250,0.35); border-radius:12px; padding:0.85rem; display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="font-size:0.86rem; font-weight:700; color:#c4b5fd;">🔮 ECHO RECALL — STATE REHYDRATE</div>
+            <div style="font-size:0.74rem; color:#cbd5e1; line-height:1.45;">ปลุกข้อมูลที่เคยถูกเก็บซ่อนไว้ในห้องนิรภัยให้กลับคืนสู่เชนหลักอย่างไร้รอยต่อ พร้อมใช้งานต่อได้ทันที</div>
+            <select id="gvRehydrateSelect" class="form-input" style="background:#0f172a; color:#f8fafc; border-color:rgba(167,139,250,0.4); font-size:0.78rem;"></select>
+            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.74rem; color:#e2e8f0; cursor:pointer;">
+              <input type="checkbox" id="gvRehydrateUnhide" checked>
+              <span>👁️ เปิดแสดงให้ผู้เรียนเห็นทันที (Unhide)</span>
+            </label>
+            <button type="button" class="btn btn-sm" style="background:#7c3aed; color:#fff; font-weight:700;" onclick="godStateRehydrate()">🔮 STATE REHYDRATE (ดึงคืนระบบ)</button>
+          </div>
+
+          <!-- 3. OBLIVION SWEEP — EXPIRED PRUNE -->
+          <div style="background:rgba(248,113,113,0.08); border:1px solid rgba(248,113,113,0.35); border-radius:12px; padding:0.85rem; display:flex; flex-direction:column; justify-content:space-between; gap:0.5rem;">
+            <div>
+              <div style="font-size:0.86rem; font-weight:700; color:#fca5a5;">🌑 OBLIVION SWEEP — EXPIRED PRUNE</div>
+              <div style="font-size:0.74rem; color:#cbd5e1; line-height:1.45; margin-top:0.35rem;">ปล่อยวางข้อมูลที่สิ้นสุดอายุขัย (DISSOLVED) ให้สลายไปจากระบบอย่างหมดจด พร้อม VACUUM คืนพื้นที่ว่างให้เชนเดินหน้าต่อ</div>
+            </div>
+            <button type="button" class="btn btn-sm" style="background:#dc2626; color:#fff; font-weight:700;" onclick="godOblivionSweep()">🌑 EXPIRED PRUNE (กวาดล้างหมดอายุ)</button>
+          </div>
+
+          <!-- 4. MIRROR REFLECTION — STATE SNAPSHOT -->
+          <div style="background:rgba(52,211,153,0.08); border:1px solid rgba(52,211,153,0.35); border-radius:12px; padding:0.85rem; display:flex; flex-direction:column; justify-content:space-between; gap:0.5rem;">
+            <div>
+              <div style="font-size:0.86rem; font-weight:700; color:#6ee7b7;">🪞 MIRROR REFLECTION — STATE SNAPSHOT</div>
+              <div style="font-size:0.74rem; color:#cbd5e1; line-height:1.45; margin-top:0.35rem;">บันทึกภาพสะท้อนสถานะทั้งหมดของเชน ณ วินาทีนั้นเก็บไว้เป็นสำเนาคู่ขนาน พร้อมรหัส SHA-256 &amp; Merkle Root</div>
+            </div>
+            <button type="button" class="btn btn-sm" style="background:#059669; color:#fff; font-weight:700;" onclick="godStateSnapshot()">🪞 STATE SNAPSHOT (สำรองทั้งเชน)</button>
+          </div>
+
+          <!-- 5. PURE ESSENCE — DATA DISTILLATION -->
+          <div style="background:rgba(244,114,182,0.08); border:1px solid rgba(244,114,182,0.35); border-radius:12px; padding:0.85rem; display:flex; flex-direction:column; gap:0.5rem;">
+            <div style="font-size:0.86rem; font-weight:700; color:#f9a8d4;">💎 PURE ESSENCE — DATA DISTILLATION</div>
+            <div style="font-size:0.74rem; color:#cbd5e1; line-height:1.45;">กลั่นกรองข้อมูลประวัติศาสตร์โดยไม่ลบทิ้ง ให้เหลือรหัสยืนยันตัวตน Merkle Proof ที่สั้นและกระชับ ตรวจสอบย้อนหลังได้</div>
+            <select id="gvDistillLessonSelect" class="form-input" style="background:#0f172a; color:#f8fafc; border-color:rgba(244,114,182,0.4); font-size:0.78rem;"></select>
+            <button type="button" class="btn btn-sm" style="background:#db2777; color:#fff; font-weight:700;" onclick="godDataDistill()">💎 DATA DISTILLATION (กลั่น Merkle Proof)</button>
+          </div>
+
+          <!-- 6. CRYSTAL AUDIT — INTEGRITY VERIFY -->
+          <div style="background:rgba(250,204,21,0.08); border:1px solid rgba(250,204,21,0.38); border-radius:12px; padding:0.85rem; display:flex; flex-direction:column; justify-content:space-between; gap:0.5rem;">
+            <div>
+              <div style="font-size:0.86rem; font-weight:700; color:#fde047;">🔍 CRYSTAL AUDIT — INTEGRITY VERIFY</div>
+              <div style="font-size:0.74rem; color:#cbd5e1; line-height:1.45; margin-top:0.35rem;">สแกนความบริสุทธิ์ของไฟล์สำรองทั้งหมดในห้องนิรภัย ยืนยันด้วย SHA-256 ว่าไม่เสียหายและไม่ถูกดัดแปลง</div>
+            </div>
+            <button type="button" class="btn btn-sm" style="background:#ca8a04; color:#fff; font-weight:700;" onclick="godCrystalAudit()">🔍 INTEGRITY VERIFY (ตรวจความสมบูรณ์)</button>
+          </div>
+
+          <!-- 7. PHOENIX REBOOT — DISASTER RECOVERY -->
+          <div style="background:rgba(251,146,60,0.1); border:1px solid rgba(251,146,60,0.45); border-radius:12px; padding:0.85rem; display:flex; flex-direction:column; gap:0.5rem; grid-column:1 / -1;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+              <div>
+                <div style="font-size:0.88rem; font-weight:700; color:#fdba74;">🔥 PHOENIX REBOOT — DISASTER RECOVERY</div>
+                <div style="font-size:0.74rem; color:#cbd5e1; line-height:1.45;">ชุบชีวิตเครือข่ายขึ้นใหม่จากไฟล์ State Snapshot ที่ผ่านการตรวจสอบแล้วในทันที หากระบบหลักหยุดชะงัก</div>
+              </div>
+              <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                <select id="gvPhoenixSelect" class="form-input" style="background:#0f172a; color:#f8fafc; border-color:rgba(251,146,60,0.45); font-size:0.78rem; min-width:230px; width:auto;"></select>
+                <button type="button" class="btn btn-sm" style="background:linear-gradient(135deg,#ea580c,#dc2626); color:#fff; font-weight:700;" onclick="godPhoenixReboot()">🔥 DISASTER RECOVERY (กู้คืนฉุกเฉิน)</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Output / Audit Log Console -->
+        <div id="godVaultOutput" style="background:rgba(2,6,23,0.85); border:1px solid rgba(148,163,184,0.28); border-radius:10px; padding:0.8rem 0.95rem; font-size:0.78rem; color:#e2e8f0; line-height:1.55; max-height:240px; overflow-y:auto;">
+          ⚡ พร้อมรับคำสั่งจาก God Therunrock — เลือกระบบด้านบนเพื่อดำเนินการ
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: จัดการสมาชิก (ปรับลดสิทธิ์ / ลบสมาชิก) ===== -->
+  <div id="memberManagementModal" class="modal-bg hidden" onclick="if(event.target===this)closeMemberManagementModal()">
+    <div class="modal-box" style="max-width:780px; width:96%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">👥 จัดการสมาชิก</span>
+          <h3 class="modal-title">จัดการรายชื่อสมาชิก ปรับลดสิทธิ์ และลบผู้ใช้</h3>
+        </div>
+        <button class="modal-close" onclick="closeMemberManagementModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:0.85rem; max-height:80vh; overflow-y:auto;">
+        <div style="display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center;">
+          <input type="text" id="memberSearchInput" class="form-input" style="flex:1; min-width:200px;" placeholder="🔍 ค้นหาชื่อ หรือ อีเมล..." oninput="renderMemberManagementList()">
+          <select id="memberWardFilter" class="form-input" style="min-width:130px; width:auto;" onchange="renderMemberManagementList()">
+            <option value="">🏥 ทุกหน่วยงาน</option>
+            <option value="หอสงฆ์">🏥 หอสงฆ์</option>
+            <option value="สว.11">🏥 สว.11</option>
+            <option value="สว.12">🏥 สว.12</option>
+            <option value="8A">🏥 8A</option>
+            <option value="8B">🏥 8B</option>
+            <option value="9A">🏥 9A</option>
+            <option value="9B">🏥 9B</option>
+            <option value="9C">🏥 9C</option>
+          </select>
+          <select id="memberRoleFilter" class="form-input" style="min-width:135px; width:auto;" onchange="renderMemberManagementList()">
+            <option value="">🔑 ทุกสิทธิ์</option>
+            <option value="learner">🎓 ผู้เรียน</option>
+            <option value="creator">👨‍🏫 ผู้สร้างบทเรียน</option>
+            <option value="manager">👔 ผู้จัดการ</option>
+          </select>
+        </div>
+
+        <div id="memberCountSummary" style="font-size:0.82rem; color:var(--muted);">กำลังโหลดรายชื่อสมาชิก...</div>
+        <div id="memberManagementList" style="display:flex; flex-direction:column; gap:0.65rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: เชื่อมต่อและซิงค์ข้อมูลระหว่างเครื่อง ===== -->
+  <div id="syncModal" class="modal-bg hidden" onclick="if(event.target===this)closeSyncModal()">
+    <div class="modal-box" style="max-width:680px; width:95%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">🔄 เชื่อมต่อข้ามเครื่อง</span>
+          <h3 class="modal-title">ใช้งานร่วมกันและซิงค์ข้อมูลระหว่างเครื่อง</h3>
+        </div>
+        <button class="modal-close" onclick="closeSyncModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:1rem; max-height:82vh; overflow-y:auto;">
+
+        <!-- สถิติข้อมูลในเครื่องปัจจุบัน -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.85rem 1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.45rem;">
+            <div style="font-size:0.86rem; font-weight:700; color:var(--primary);">
+              💻 ข้อมูลในเครื่องนี้ (<span id="syncHostnameLabel">-</span>)
+            </div>
+            <span id="syncOnlineCountBadge" style="background:rgba(16,185,129,0.14); color:#059669; border:1px solid rgba(16,185,129,0.35); padding:0.2rem 0.65rem; border-radius:999px; font-size:0.78rem; font-weight:700;">
+              🟢 เชื่อมต่ออยู่ 1 เครื่อง
+            </span>
+          </div>
+          <div id="syncLocalCountsBox" style="display:flex; flex-wrap:wrap; gap:0.5rem; font-size:0.82rem; color:var(--text);">
+            กำลังโหลดข้อมูล...
+          </div>
+        </div>
+
+        <!-- วิธีที่ 1: เปิดผ่าน LAN เดียวกัน + QR Code -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
+          <div style="font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:0.35rem;">
+            📱 วิธีที่ 1: สแกน QR Code เพื่อเข้าใช้งานเครื่องนี้โดยตรง (Wi-Fi / LAN เดียวกัน)
+          </div>
+          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
+            ใช้มือถือ, iPad หรือคอมพิวเตอร์เครื่องอื่นในวง Wi-Fi เดียวกัน สแกน QR Code หรือเปิดลิงก์ด้านล่างเพื่อใช้งานฐานข้อมูลเดียวกันแบบเรียลไทม์:
+          </div>
+          <div id="syncLanUrlList" style="display:flex; flex-direction:column; gap:0.6rem;"></div>
+        </div>
+
+        <!-- วิธีที่ 2: Auto-Sync ผ่าน Google Apps Script + Google Sheet -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.35rem;">
+            <div style="font-size:0.9rem; font-weight:700; color:var(--text);">
+              ☁️ วิธีที่ 2: Auto-Sync ข้ามเครื่องผ่าน Google Apps Script & Google Sheet
+            </div>
+            <button type="button" class="btn btn-sm btn-wallet" onclick="copyGasScriptCode()" title="คัดลอกโค้ดสำหรับนำไปวางใน Google Sheet > Extensions > Apps Script">
+              📋 คัดลอกโค้ด Google Apps Script
+            </button>
+          </div>
+          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
+            ฝาก IP/URL ของแต่ละเครื่องและบันทึกข้อมูลลง <strong>Google Sheet</strong> เป็นฐานข้อมูลกลาง พร้อมตรวจสอบจำนวนเครื่องที่ออนไลน์ และลบเครื่องที่ไม่ได้ใช้งานเกินเวลาออกอัตโนมัติ:
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:0.55rem;">
+            <div>
+              <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
+                🔗 URL ของ Google Apps Script Web App (หรือ URL เครื่องแม่ข่าย):
+              </label>
+              <input type="text" id="syncPeerUrlInput" class="form-input" style="width:100%;" placeholder="เช่น https://script.google.com/macros/s/.../exec หรือ http://192.168.1.45:8888">
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; margin-top:0.15rem;">
+              <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:600; color:var(--text); cursor:pointer;">
+                <input type="checkbox" id="syncAutoEnabledCheckbox" checked style="width:16px; height:16px; accent-color:var(--primary);">
+                ⚡ เปิด Auto-Sync อัตโนมัติ (ทุก 30 วินาที)
+              </label>
+
+              <div style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; color:var(--muted);">
+                <span>ลบเครื่องที่ไม่ออนไลน์เกิน:</span>
+                <input type="number" id="syncTimeoutSecInput" class="form-input" value="180" min="15" max="3600" style="width:75px; padding:0.25rem 0.45rem; text-align:center;">
+                <span>วินาที</span>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.25rem;">
+              <button type="button" id="btnPeerSyncSubmit" class="btn btn-primary" style="flex:1;" onclick="submitPeerSync()">
+                🔄 บันทึก & ซิงค์ข้อมูลทันที
+              </button>
+            </div>
+          </div>
+
+          <!-- รายชื่อเครื่องที่กำลังเชื่อมต่ออยู่ -->
+          <div style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px dashed var(--border);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
+              <span style="font-size:0.82rem; font-weight:700; color:var(--text);">🖥️ เครื่องที่เชื่อมต่ออยู่ในระบบตอนนี้:</span>
+              <span id="syncLastSyncLabel" style="font-size:0.75rem; color:var(--muted);">ยังไม่ได้ซิงค์</span>
+            </div>
+            <div id="syncActiveNodesList" style="display:flex; flex-direction:column; gap:0.35rem; font-size:0.8rem;"></div>
+          </div>
+        </div>
+
+        <!-- วิธีที่ 3: ส่งออก / นำเข้าไฟล์ข้อมูล (กรณีอยู่คนละวงแลน หรือส่งผ่าน LINE / Flash Drive) -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
+          <div style="font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:0.35rem;">
+            📦 วิธีที่ 3: ส่งออก / นำเข้าไฟล์ข้อมูล (ส่งผ่าน LINE หรือ Flash Drive)
+          </div>
+          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.6rem; line-height:1.5;">
+            ใช้เมื่อต้องการสำรองข้อมูล หรือส่งออกข้อมูลทั้งหมดเป็นไฟล์เดียวแล้วนำไปกดนำเข้าที่อีกเครื่อง:
+          </div>
+          <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm btn-wallet" onclick="exportSyncSnapshotFile()">
+              ⬇️ ส่งออกไฟล์ข้อมูล
+            </button>
+            <label class="btn btn-sm btn-primary" style="cursor:pointer; margin:0;">
+              ⬆️ นำเข้าไฟล์ข้อมูล
+              <input type="file" id="syncImportFileInput" accept=".json" style="display:none;" onchange="importSyncSnapshotFile(event)">
+            </label>
+          </div>
+        </div>
+
+        <div id="syncResultStatusBox" class="hidden" style="padding:0.75rem 1rem; border-radius:8px; font-size:0.84rem; line-height:1.5;"></div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: ตัวอย่างก่อนพิมพ์ ===== -->
+  <div id="printPreviewModal" class="modal-bg hidden" onclick="if(event.target===this)closePrintPreviewModal()">
+    <div class="modal-box" style="max-width:900px; width:96%;">
+      <div class="modal-hdr" style="background:rgba(15,23,42,0.95);">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge" style="background:rgba(234,179,8,0.18); color:#fde047; border-color:rgba(234,179,8,0.4);">🖨️ ตัวอย่างก่อนพิมพ์</span>
+          <h3 class="modal-title" id="printPreviewTitle">ตัวอย่างเอกสารก่อนพิมพ์</h3>
+        </div>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <button type="button" class="btn btn-sm btn-mint" onclick="triggerNativePrint()">
+            🖨️ พิมพ์ / บันทึก PDF
+          </button>
+          <button class="modal-close" onclick="closePrintPreviewModal()">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" style="max-height:82vh; overflow-y:auto; background:#cbd5e1; padding:1.5rem;">
+        <div id="printPreviewContent" style="margin:0 auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Container for Printable Content -->
+  <div id="printableArea" class="hidden"></div>
+
+  <!-- ===== VERSION BADGE & UPDATE MODAL ===== -->
+  <button id="appVersionBadge" type="button" onclick="openUpdateModal()" title="ตรวจสอบเวอร์ชันและการอัปเดต"
+    style="position:fixed; bottom:10px; right:12px; z-index:900; padding:0.25rem 0.65rem; border-radius:999px; font-size:0.74rem; font-weight:600; background:var(--card); color:var(--text-sec); border:1px solid var(--border); cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    LearnChain ...
+  </button>
+
+  <div id="appUpdateModal" class="modal-bg hidden" onclick="if(event.target===this)closeUpdateModal()">
+    <div class="modal-box" style="max-width:480px; width:94%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">🔄 Version & Update</span>
+          <h3 class="modal-title">เวอร์ชันและการอัปเดตระบบ</h3>
+        </div>
+        <button class="modal-close" onclick="closeUpdateModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:0.85rem;">
+        <div id="updateCurrentInfo" style="padding:0.75rem; border-radius:var(--r); background:var(--bg); border:1px solid var(--border); font-size:0.85rem; line-height:1.6;"></div>
+        <div id="updateCheckResult" style="padding:0.75rem; border-radius:var(--r); background:var(--bg); border:1px solid var(--border); font-size:0.85rem; line-height:1.6;">
+          กำลังตรวจสอบ...
+        </div>
+        <div style="display:flex; gap:0.5rem; justify-content:flex-end; flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm btn-wallet" onclick="checkAppUpdate()">🔍 ตรวจสอบอีกครั้ง</button>
+          <button type="button" id="btnApplyAppUpdate" class="btn btn-sm btn-primary hidden" onclick="applyAppUpdate()">⬇️ อัปเดตและรีสตาร์ท</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
