@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -169,6 +170,7 @@ func (s *UpdaterService) checkGitHubRelease(ctx context.Context, res *UpdateChec
 	}
 
 	var exeURL, exeName, checksumURL string
+	bestScore := -1
 	for _, asset := range rel.Assets {
 		lower := strings.ToLower(asset.Name)
 		if lower == "checksums.txt" || lower == "sha256sums.txt" {
@@ -176,8 +178,9 @@ func (s *UpdaterService) checkGitHubRelease(ctx context.Context, res *UpdateChec
 			continue
 		}
 		if strings.HasSuffix(lower, ".exe") {
-			// Prefer LearnChain.exe if multiple .exe assets exist
-			if exeURL == "" || strings.Contains(lower, "learnchain") {
+			score := scoreExeAsset(lower, runtime.GOARCH)
+			if score > bestScore {
+				bestScore = score
 				exeURL = asset.BrowserDownloadURL
 				exeName = asset.Name
 			}
@@ -353,6 +356,31 @@ func (s *UpdaterService) ApplyUpdate(ctx context.Context, downloadURL, expectedS
 		BackupPath: backupPath,
 		SHA256:     actualSHA256,
 	}, nil
+}
+
+func scoreExeAsset(lowerName, arch string) int {
+	score := 0
+	if strings.Contains(lowerName, "learnchain") {
+		score += 10
+	}
+	isArm64 := strings.Contains(lowerName, "arm64")
+	isX64 := strings.Contains(lowerName, "amd64") || strings.Contains(lowerName, "x64")
+
+	switch arch {
+	case "arm64":
+		if isArm64 {
+			score += 100
+		} else if !isX64 {
+			score += 20 // generic LearnChain.exe fallback
+		}
+	case "amd64":
+		if isX64 {
+			score += 100
+		} else if !isArm64 {
+			score += 50 // generic LearnChain.exe (built as amd64)
+		}
+	}
+	return score
 }
 
 func isAllowedDownloadURL(raw string) bool {

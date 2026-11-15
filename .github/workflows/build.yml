@@ -43,24 +43,35 @@ jobs:
           echo "commit=$($env:GITHUB_SHA.Substring(0, 7))" >> $env:GITHUB_OUTPUT
           echo "build_date=$date" >> $env:GITHUB_OUTPUT
 
-      - name: Build Executable
+      - name: Build Executables (x64 & arm64)
         env:
           CGO_ENABLED: '0'
-        run: |
-          go build -ldflags="-H=windowsgui -s -w -X elearning-sbt/version.Version=${{ steps.meta.outputs.version }} -X elearning-sbt/version.Commit=${{ steps.meta.outputs.commit }} -X elearning-sbt/version.BuildDate=${{ steps.meta.outputs.build_date }}" -o LearnChain.exe .
-
-      - name: Generate SHA-256 Checksum
+          GOOS: 'windows'
         shell: pwsh
         run: |
-          $hash = (Get-FileHash -Path LearnChain.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  LearnChain.exe" | Out-File -FilePath checksums.txt -Encoding ascii
+          $ldflags = "-H=windowsgui -s -w -X elearning-sbt/version.Version=${{ steps.meta.outputs.version }} -X elearning-sbt/version.Commit=${{ steps.meta.outputs.commit }} -X elearning-sbt/version.BuildDate=${{ steps.meta.outputs.build_date }}"
+          $env:GOARCH = "amd64"
+          go build -ldflags="$ldflags" -o LearnChain.exe .
+          Copy-Item LearnChain.exe LearnChain-x64.exe
+          $env:GOARCH = "arm64"
+          go build -ldflags="$ldflags" -o LearnChain-arm64.exe .
 
-      - name: Upload Binary Artifact
+      - name: Generate SHA-256 Checksums
+        shell: pwsh
+        run: |
+          @("LearnChain.exe", "LearnChain-x64.exe", "LearnChain-arm64.exe") | ForEach-Object {
+            $hash = (Get-FileHash -Path $_ -Algorithm SHA256).Hash.ToLower()
+            "$hash  $_"
+          } | Out-File -FilePath checksums.txt -Encoding ascii
+
+      - name: Upload Binary Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: learnchain-windows-${{ steps.meta.outputs.version }}
           path: |
             LearnChain.exe
+            LearnChain-x64.exe
+            LearnChain-arm64.exe
             checksums.txt
 
       - name: Publish GitHub Release
@@ -70,4 +81,6 @@ jobs:
           generate_release_notes: true
           files: |
             LearnChain.exe
+            LearnChain-x64.exe
+            LearnChain-arm64.exe
             checksums.txt
