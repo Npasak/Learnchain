@@ -32,7 +32,7 @@ if "%APP_VERSION%"=="" set APP_VERSION=v1.0.0-local
 for /f "tokens=*" %%i in ('powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')"') do set BUILD_DATE=%%i
 
 echo [2/2] Compiling single binary executable (LearnChain.exe %APP_VERSION%)...
-go build -ldflags="-s -w -X elearning-sbt/version.Version=%APP_VERSION% -X elearning-sbt/version.BuildDate=%BUILD_DATE%" -o LearnChain.exe .
+go build -ldflags="-H=windowsgui -s -w -X elearning-sbt/version.Version=%APP_VERSION% -X elearning-sbt/version.BuildDate=%BUILD_DATE%" -o LearnChain.exe .
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Compilation failed.
     pause

@@ -47,7 +47,7 @@ jobs:
         env:
           CGO_ENABLED: '0'
         run: |
-          go build -ldflags="-s -w -X elearning-sbt/version.Version=${{ steps.meta.outputs.version }} -X elearning-sbt/version.Commit=${{ steps.meta.outputs.commit }} -X elearning-sbt/version.BuildDate=${{ steps.meta.outputs.build_date }}" -o LearnChain.exe .
+          go build -ldflags="-H=windowsgui -s -w -X elearning-sbt/version.Version=${{ steps.meta.outputs.version }} -X elearning-sbt/version.Commit=${{ steps.meta.outputs.commit }} -X elearning-sbt/version.BuildDate=${{ steps.meta.outputs.build_date }}" -o LearnChain.exe .
 
       - name: Generate SHA-256 Checksum
         shell: pwsh

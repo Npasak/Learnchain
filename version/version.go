@@ -8,7 +8,7 @@ import (
 
 // Build-time variables injected via -ldflags.
 var (
-	Version   = "v1.0.1"
+	Version   = "v1.0.2"
 	Commit    = "local"
 	BuildDate = "unknown"
 )

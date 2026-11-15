@@ -30,7 +30,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     if ($sha) { $GitCommit = $sha }
 }
 $BuildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-$LdFlags = "-s -w -X elearning-sbt/version.Version=$AppVersion -X elearning-sbt/version.Commit=$GitCommit -X elearning-sbt/version.BuildDate=$BuildDate"
+$LdFlags = "-H=windowsgui -s -w -X elearning-sbt/version.Version=$AppVersion -X elearning-sbt/version.Commit=$GitCommit -X elearning-sbt/version.BuildDate=$BuildDate"
 
 Write-Host "📦 [1/2] Fetching modules and dependencies (go mod tidy)..." -ForegroundColor Yellow
 go mod tidy

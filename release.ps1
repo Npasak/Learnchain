@@ -35,7 +35,7 @@ Write-Host "========================================================" -Foregroun
 Write-Host "  LearnChain Release Builder ($Version)" -ForegroundColor Cyan
 Write-Host "========================================================" -ForegroundColor Cyan
 
-$LdFlags = "-s -w -X elearning-sbt/version.Version=$Version -X elearning-sbt/version.Commit=$Commit -X elearning-sbt/version.BuildDate=$BuildDate"
+$LdFlags = "-H=windowsgui -s -w -X elearning-sbt/version.Version=$Version -X elearning-sbt/version.Commit=$Commit -X elearning-sbt/version.BuildDate=$BuildDate"
 go build -ldflags="$LdFlags" -o LearnChain.exe .
 
 $hash = (Get-FileHash -Path LearnChain.exe -Algorithm SHA256).Hash.ToLower()
