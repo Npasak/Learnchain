@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#4338ca"/>
+    </linearGradient>
+    <linearGradient id="bookCover" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e40af"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="chainGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde047"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App Badge Background -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bgGrad)"/>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="2"/>
+
+  <!-- Book Back Cover & Pages -->
+  <rect x="30" y="22" width="68" height="84" rx="8" fill="#0f172a" opacity="0.35" transform="translate(3,4)"/>
+  <rect x="30" y="22" width="68" height="84" rx="8" fill="#e2e8f0"/>
+  <!-- Page lines -->
+  <path d="M90 26 v76 M94 28 v72" stroke="#cbd5e1" stroke-width="1.5"/>
+
+  <!-- Book Front Cover -->
+  <rect x="28" y="20" width="62" height="84" rx="7" fill="url(#bookCover)" stroke="#38bdf8" stroke-width="2"/>
+  <!-- Spine Highlight -->
+  <rect x="28" y="20" width="11" height="84" rx="4" fill="#1d4ed8" opacity="0.85"/>
+  <line x1="39" y1="22" x2="39" y2="102" stroke="#60a5fa" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Bookmark Ribbon -->
+  <polygon points="73,20 82,20 82,42 77.5,37 73,42" fill="#38bdf8"/>
+
+  <!-- Chain Wrapped Around the Book (3 interlocking diagonal/horizontal links) -->
+  <g transform="rotate(-18 64 64)">
+    <!-- Left Link -->
+    <rect x="18" y="53" width="34" height="20" rx="10" fill="none" stroke="#451a03" stroke-width="7.5"/>
+    <rect x="18" y="53" width="34" height="20" rx="10" fill="none" stroke="url(#chainGold)" stroke-width="4.5"/>
+
+    <!-- Right Link -->
+    <rect x="76" y="53" width="34" height="20" rx="10" fill="none" stroke="#451a03" stroke-width="7.5"/>
+    <rect x="76" y="53" width="34" height="20" rx="10" fill="none" stroke="url(#chainGold)" stroke-width="4.5"/>
+
+    <!-- Center Interlocking Link -->
+    <rect x="44" y="51" width="40" height="24" rx="12" fill="none" stroke="#451a03" stroke-width="8"/>
+    <rect x="44" y="51" width="40" height="24" rx="12" fill="none" stroke="url(#chainGold)" stroke-width="5"/>
+    <!-- Metallic Highlight -->
+    <path d="M53 54 h22" stroke="#fef08a" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>
+  </g>
+</svg>

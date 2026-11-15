@@ -234,33 +234,71 @@ func createTrayIconHandle() syscall.Handle {
 	pixels := make([]byte, size*size*4) // BGRA
 	mask := make([]byte, size*size/8)
 
-	cx, cy := 15.5, 15.5
+	setPx := func(x, y int, r, g, b byte) {
+		idx := (y*size + x) * 4
+		pixels[idx+0] = b
+		pixels[idx+1] = g
+		pixels[idx+2] = r
+		pixels[idx+3] = 255
+	}
+
+	inRoundedRect := func(x, y, x0, y0, x1, y1, rad int) bool {
+		if x < x0 || x > x1 || y < y0 || y > y1 {
+			return false
+		}
+		cx, cy := 0, 0
+		if x < x0+rad && y < y0+rad {
+			cx, cy = x0+rad, y0+rad
+		} else if x > x1-rad && y < y0+rad {
+			cx, cy = x1-rad, y0+rad
+		} else if x < x0+rad && y > y1-rad {
+			cx, cy = x0+rad, y1-rad
+		} else if x > x1-rad && y > y1-rad {
+			cx, cy = x1-rad, y1-rad
+		} else {
+			return true
+		}
+		dx, dy := x-cx, y-cy
+		return dx*dx+dy*dy <= rad*rad
+	}
+
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
-			dx := float64(x) - cx
-			dy := float64(y) - cy
-			dist2 := dx*dx + dy*dy
-			idx := (y*size + x) * 4
-
-			if dist2 <= 14.5*14.5 {
-				// Medical sky-blue circle with white '+'
-				isPlus := (x >= 13 && x <= 18 && y >= 7 && y <= 24) || (y >= 13 && y <= 18 && x >= 7 && x <= 24)
-				if isPlus {
-					pixels[idx+0] = 255 // B
-					pixels[idx+1] = 255 // G
-					pixels[idx+2] = 255 // R
-					pixels[idx+3] = 255 // A
-				} else {
-					pixels[idx+0] = 233 // B (#0284c7 / #0ea5e9)
-					pixels[idx+1] = 165 // G
-					pixels[idx+2] = 14  // R
-					pixels[idx+3] = 255 // A
-				}
-			} else {
-				// Transparent outside circle
+			if !inRoundedRect(x, y, 1, 1, 30, 30, 6) {
 				byteIdx := (y*size + x) / 8
 				bitIdx := uint(7 - ((y*size + x) % 8))
 				mask[byteIdx] |= 1 << bitIdx
+				continue
+			}
+
+			// Sky-blue to indigo badge gradient
+			t := float64(x+y) / 60.0
+			bgR := byte(14 + t*53)
+			bgG := byte(165 - t*109)
+			bgB := byte(233 - t*31)
+			setPx(x, y, bgR, bgG, bgB)
+
+			// Book (center)
+			if x >= 8 && x <= 23 && y >= 5 && y <= 26 {
+				if x >= 22 && y >= 6 && y <= 25 {
+					setPx(x, y, 241, 245, 249) // White pages edge
+				} else if x <= 10 {
+					setPx(x, y, 59, 130, 246) // Book spine
+				} else {
+					setPx(x, y, 30, 58, 138) // Navy hardcover
+				}
+			}
+
+			// Golden chain wrapped horizontally around the book
+			inLeftLink := (x >= 5 && x <= 13 && y >= 13 && y <= 18) && !(x >= 7 && x <= 11 && y >= 15 && y <= 16)
+			inRightLink := (x >= 18 && x <= 26 && y >= 13 && y <= 18) && !(x >= 20 && x <= 24 && y >= 15 && y <= 16)
+			inCenterLink := (x >= 11 && x <= 20 && y >= 12 && y <= 19) && !(x >= 13 && x <= 18 && y >= 14 && y <= 17)
+			if inLeftLink || inRightLink || inCenterLink {
+				if y == 12 || y == 13 {
+					setPx(x, y, 253, 224, 71) // Gold highlight
+				} else {
+					setPx(x, y, 245, 158, 11) // Rich amber gold
+				}
 			}
 		}
 	}
