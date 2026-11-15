@@ -106,18 +106,18 @@ DApps/
 โปรเจกต์ได้รับการกำหนดค่าเริ่มต้นเป็น **Option B (Pure Go SQLite: `github.com/glebarez/sqlite`)** เรียบร้อยแล้ว จึงสามารถคอมไพล์ได้ทันทีบน Windows โดย**ไม่ต้องติดตั้ง GCC/MinGW**:
 
 ### วิธีที่ 1: รันผ่าน Script อัตโนมัติ (คลิกเดียวจบ)
-- **ดับเบิลคลิกไฟล์ [build.bat](file:///c:/Users/pasak/OneDrive/Documents/DApps/build.bat)** หรือ
+- **ดับเบิลคลิกไฟล์ [build.bat](build.bat)** หรือ
 - รันใน PowerShell:
   ```powershell
   .\build.ps1
   ```
-Script จะทำการตรวจสอบ path ของ Go, อัปเดต dependencies, คอมไพล์เป็น `elearning-dapp.exe` และรันโปรแกรมขึ้นมาให้ทันที
+Script จะทำการตรวจสอบ path ของ Go, อัปเดต dependencies, คอมไพล์เป็น `LearnChain.exe` และรันโปรแกรมขึ้นมาให้ทันที
 
 ### วิธีที่ 2: รันคำสั่งด้วยตนเองใน Terminal
 ```powershell
 $env:CGO_ENABLED="0"
 go mod tidy
-go build -ldflags="-s -w" -o elearning-dapp.exe main.go
+go build -ldflags="-s -w" -o LearnChain.exe .
 ```
 
 > **คำอธิบาย Flags:**
@@ -129,8 +129,15 @@ go build -ldflags="-s -w" -o elearning-dapp.exe main.go
 
 รันไฟล์ `.exe` ผ่าน PowerShell หรือดับเบิลคลิกไฟล์:
 ```powershell
-.\elearning-dapp.exe
+.\LearnChain.exe
 ```
+
+### 🔄 การออกเวอร์ชันและการอัปเดต (Release & Auto-Update)
+- ออกเวอร์ชันใหม่ขึ้น GitHub Releases อัตโนมัติ:
+  ```powershell
+  .\release.ps1 v1.0.1
+  ```
+- เครื่องผู้ใช้สามารถกดปุ่ม **`LearnChain v...`** มุมขวาล่างของหน้าเว็บ เพื่อตรวจสอบเวอร์ชันและกด **อัปเดตและรีสตาร์ท** ได้ทันที (ระบบจะสำรอง `elearning.db` ลง `backups/` อัตโนมัติก่อนอัปเกรด)
 
 เมื่อโปรแกรมเริ่มทำงาน:
 1. ระบบจะเชื่อมต่อและสร้างฐานข้อมูล SQLite (`elearning.db`) อัตโนมัติ
