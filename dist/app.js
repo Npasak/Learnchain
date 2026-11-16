@@ -4283,23 +4283,100 @@ async function renderLessonSignatoryCheckboxes(containerId, checkboxClass, exist
   const box = document.getElementById(containerId);
   if (!box) return;
   await loadSignatoriesCache();
-  const selectedIds = new Set(parseSignatoryIDs(existingRaw));
+  const savedOrder = parseSignatoryIDs(existingRaw);
+  const selectedIds = new Set(savedOrder);
 
   if (!allSignatoriesCache.length) {
     box.innerHTML = `<span style="color:var(--muted);">ยังไม่มีรายชื่อผู้ลงนาม (ผู้จัดการสามารถเพิ่มได้ที่เมนู "✍️ ผู้ลงนามวุฒิบัตร")</span>`;
     return;
   }
 
-  box.innerHTML = allSignatoriesCache.map(s => `
-    <label style="display:flex; align-items:center; gap:0.55rem; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid var(--border); background:var(--card); cursor:pointer;">
-      <input type="checkbox" class="${checkboxClass}" value="${s.id}" ${selectedIds.has(s.id) ? 'checked' : ''}>
+  // Put previously selected signatories first in their saved order, then remaining ones
+  const ordered = [];
+  savedOrder.forEach(id => {
+    const found = allSignatoriesCache.find(s => s.id === id);
+    if (found) ordered.push(found);
+  });
+  allSignatoriesCache.forEach(s => {
+    if (!selectedIds.has(s.id)) ordered.push(s);
+  });
+
+  box.innerHTML = ordered.map(s => `
+    <label class="sig-drag-item" draggable="true" data-sig-id="${s.id}"
+      style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid var(--border); background:var(--card); cursor:grab; user-select:none;">
+      <span title="ลากเพื่อสลับลำดับ" style="color:var(--muted); font-weight:700; font-size:0.9rem; cursor:grab; padding:0 2px;">⋮⋮</span>
+      <input type="checkbox" class="${checkboxClass}" value="${s.id}" ${selectedIds.has(s.id) ? 'checked' : ''} onchange="updateSignatoryOrderBadges('${containerId}', '${checkboxClass}')">
       ${s.signature_url ? `<img src="${escapeHtml(s.signature_url)}" alt="sig" style="height:24px; max-width:72px; object-fit:contain; background:#fff; border-radius:4px; padding:1px;">` : ''}
       <div style="flex:1; line-height:1.3;">
         <div style="font-weight:700; color:var(--text);">${escapeHtml(s.full_name)}</div>
         <div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(s.position)}</div>
       </div>
+      <span class="sig-order-badge" style="font-size:0.7rem; font-weight:700; color:var(--primary);"></span>
     </label>
   `).join('');
+
+  initSignatoryDragAndDrop(box, containerId, checkboxClass);
+  updateSignatoryOrderBadges(containerId, checkboxClass);
+}
+
+function updateSignatoryOrderBadges(containerId, checkboxClass) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const checkedBoxes = Array.from(box.querySelectorAll(`.${checkboxClass}:checked`));
+  const totalChecked = checkedBoxes.length;
+  box.querySelectorAll('.sig-drag-item').forEach(row => {
+    const cb = row.querySelector(`.${checkboxClass}`);
+    const badge = row.querySelector('.sig-order-badge');
+    if (!badge || !cb) return;
+    if (!cb.checked) {
+      badge.textContent = '';
+      return;
+    }
+    const idx = checkedBoxes.indexOf(cb) + 1;
+    if (totalChecked === 3) {
+      const posLabels = { 1: '1 (บน)', 2: '2 (ล่างซ้าย)', 3: '3 (ล่างขวา)' };
+      badge.textContent = posLabels[idx] || `#${idx}`;
+    } else {
+      badge.textContent = `#${idx}`;
+    }
+  });
+}
+
+function initSignatoryDragAndDrop(box, containerId, checkboxClass) {
+  let draggedEl = null;
+  box.querySelectorAll('.sig-drag-item').forEach(item => {
+    item.addEventListener('dragstart', (e) => {
+      draggedEl = item;
+      item.style.opacity = '0.45';
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    item.addEventListener('dragend', () => {
+      item.style.opacity = '1';
+      box.querySelectorAll('.sig-drag-item').forEach(el => { el.style.borderColor = 'var(--border)'; });
+      draggedEl = null;
+      updateSignatoryOrderBadges(containerId, checkboxClass);
+    });
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!draggedEl || draggedEl === item) return;
+      item.style.borderColor = 'var(--primary)';
+      const rect = item.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > (rect.height / 2);
+      if (after) {
+        item.parentNode.insertBefore(draggedEl, item.nextSibling);
+      } else {
+        item.parentNode.insertBefore(draggedEl, item);
+      }
+    });
+    item.addEventListener('dragleave', () => {
+      item.style.borderColor = 'var(--border)';
+    });
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      item.style.borderColor = 'var(--border)';
+      updateSignatoryOrderBadges(containerId, checkboxClass);
+    });
+  });
 }
 
 function collectSelectedSignatoryIDs(checkboxClass) {
