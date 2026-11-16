@@ -118,6 +118,7 @@ func main() {
 	// Courses
 	api.Get("/courses", courseHandler.ListCourses)
 	api.Get("/courses/creator/:creatorId", courseHandler.GetCourseByCreator)
+	api.Get("/creator/certificate-data", lessonHandler.GetCreatorCertificateData)
 	api.Get("/courses/:id", courseHandler.GetCourseDetails)
 	api.Put("/courses/:id", courseHandler.UpdateCourse)
 

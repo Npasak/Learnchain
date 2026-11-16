@@ -305,22 +305,34 @@ type EmailLoginRequest struct {
 	Role     string `json:"role"`
 }
 
-// LessonRating stores a learner's 1-5 star rating for a lesson (1 per user per lesson, anonymous in reports)
+// LessonRating stores a learner's 1-5 star rating & optional comment for a lesson (1 per user per lesson, anonymous in reports)
 type LessonRating struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	LessonID  uint           `gorm:"not null;uniqueIndex:idx_user_lesson_rating" json:"lesson_id"`
 	UserID    uint           `gorm:"not null;uniqueIndex:idx_user_lesson_rating" json:"-"`
 	Rating    int            `gorm:"not null" json:"rating"` // 1..5
+	Comment   string         `gorm:"type:text" json:"comment"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// LessonRatingStatsDTO holds aggregated anonymous rating stats (1-5 stars breakdown & average)
+// LessonRatingCommentDTO holds an anonymous learner comment + star rating.
+type LessonRatingCommentDTO struct {
+	ID        uint      `json:"id"`
+	LessonID  uint      `json:"lesson_id"`
+	Rating    int       `json:"rating"`
+	Comment   string    `json:"comment"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// LessonRatingStatsDTO holds aggregated anonymous rating stats (1-5 stars breakdown, average & comments)
 type LessonRatingStatsDTO struct {
-	LessonID      uint        `json:"lesson_id"`
-	AverageRating float64     `json:"average_rating"`
-	TotalRatings  int64       `json:"total_ratings"`
-	StarCounts    map[int]int `json:"star_counts"` // 1..5 -> count
-	MyRating      int         `json:"my_rating,omitempty"`
+	LessonID      uint                     `json:"lesson_id"`
+	AverageRating float64                  `json:"average_rating"`
+	TotalRatings  int64                    `json:"total_ratings"`
+	StarCounts    map[int]int              `json:"star_counts"` // 1..5 -> count
+	MyRating      int                      `json:"my_rating,omitempty"`
+	MyComment     string                   `json:"my_comment,omitempty"`
+	Comments      []LessonRatingCommentDTO `json:"comments,omitempty"`
 }

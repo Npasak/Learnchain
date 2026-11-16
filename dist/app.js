@@ -3866,8 +3866,11 @@ async function loadLessonRatingWidget(lessonId) {
   }
 }
 
+let currentMyRatingVal = 0;
+
 function renderLessonRatingStars(stats) {
   const myRating = Number(stats.my_rating || 0);
+  currentMyRatingVal = myRating;
   const avg = Number(stats.average_rating || 0).toFixed(1);
   const total = Number(stats.total_ratings || 0);
   const summaryEl = document.getElementById('lessonRatingSummaryText');
@@ -3875,6 +3878,10 @@ function renderLessonRatingStars(stats) {
     summaryEl.innerText = myRating > 0
       ? `คุณให้คะแนนแล้ว ${myRating} ดาว • คะแนนเฉลี่ย ${avg}/5.0 (${total} รีวิว)`
       : `คะแนนเฉลี่ย ${avg}/5.0 (${total} รีวิว)`;
+  }
+  const commentEl = document.getElementById('lessonRatingCommentInput');
+  if (commentEl && typeof stats.my_comment === 'string') {
+    commentEl.value = stats.my_comment;
   }
   const starsWrap = document.getElementById('lessonRatingStars');
   if (starsWrap) {
@@ -3890,11 +3897,33 @@ function renderLessonRatingStars(stats) {
 
 async function submitLessonRating(stars) {
   if (!currentLesson || !currentLesson.id) return;
-  const res = await fetchJSON(`/api/lessons/${currentLesson.id}/rate`, 'POST', { rating: stars });
+  const commentEl = document.getElementById('lessonRatingCommentInput');
+  const commentVal = commentEl ? commentEl.value.trim() : '';
+  const res = await fetchJSON(`/api/lessons/${currentLesson.id}/rate`, 'POST', {
+    rating: stars,
+    comment: commentVal
+  });
   if (res && res.success && res.stats) {
     renderLessonRatingStars(res.stats);
   } else {
     alert('❌ ' + ((res && res.message) || 'ไม่สามารถบันทึกคะแนนได้'));
+  }
+}
+
+async function submitLessonCommentOnly() {
+  if (!currentLesson || !currentLesson.id) return;
+  const commentEl = document.getElementById('lessonRatingCommentInput');
+  const commentVal = commentEl ? commentEl.value.trim() : '';
+  const starsToSend = currentMyRatingVal > 0 ? currentMyRatingVal : 5;
+  const res = await fetchJSON(`/api/lessons/${currentLesson.id}/rate`, 'POST', {
+    rating: starsToSend,
+    comment: commentVal
+  });
+  if (res && res.success && res.stats) {
+    renderLessonRatingStars(res.stats);
+    alert('💬 บันทึกความคิดเห็นเรียบร้อยแล้ว (ไม่ระบุตัวตน)');
+  } else {
+    alert('❌ ' + ((res && res.message) || 'ไม่สามารถบันทึกความคิดเห็นได้'));
   }
 }
 
@@ -4452,4 +4481,251 @@ async function deleteSignatoryItem(id) {
   } else {
     alert('❌ ' + ((res && res.error) || 'ลบไม่สำเร็จ'));
   }
+}
+
+// ============================================================
+// CREATOR CERTIFICATE (A4 PORTRAIT 2 PAGES + COMMENT FILTER)
+// ============================================================
+let creatorCertDataCache = null;
+
+async function openCreatorCertificateModal() {
+  const modal = document.getElementById('creatorCertificateModal');
+  if (modal) modal.classList.remove('hidden');
+
+  const nameInput = document.getElementById('ccCreatorNameInput');
+  if (nameInput && !nameInput.value.trim() && currentUser) {
+    nameInput.value = currentUser.name || '';
+  }
+
+  await loadSignatoriesCache();
+  const sigSel = document.getElementById('ccSignatorySelect');
+  if (sigSel) {
+    const opts = ['<option value="">— ใช้ชื่อหน่วยงานเป็นค่าเริ่มต้น —</option>'];
+    allSignatoriesCache.forEach(s => {
+      opts.push(`<option value="${s.id}">${escapeHtml(s.full_name)} (${escapeHtml(s.position)})</option>`);
+    });
+    sigSel.innerHTML = opts.join('');
+  }
+
+  await loadCreatorCertificateData();
+}
+
+function closeCreatorCertificateModal() {
+  const modal = document.getElementById('creatorCertificateModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function clearCreatorCertDates() {
+  const s = document.getElementById('ccStartDateInput');
+  const e = document.getElementById('ccEndDateInput');
+  if (s) s.value = '';
+  if (e) e.value = '';
+  loadCreatorCertificateData();
+}
+
+async function loadCreatorCertificateData() {
+  const startVal = document.getElementById('ccStartDateInput')?.value || '';
+  const endVal = document.getElementById('ccEndDateInput')?.value || '';
+  const params = new URLSearchParams();
+  if (startVal) params.set('start_date', startVal);
+  if (endVal) params.set('end_date', endVal);
+
+  const summaryEl = document.getElementById('ccSummaryPreview');
+  const commentsEl = document.getElementById('ccCommentsCheckList');
+  if (summaryEl) summaryEl.innerHTML = '⏳ กำลังโหลดสถิติบทเรียนและข้อคิดเห็น...';
+
+  const res = await fetchJSON(`/api/creator/certificate-data?${params.toString()}`);
+  if (!res || !res.success) {
+    if (summaryEl) summaryEl.innerHTML = '❌ ไม่สามารถโหลดข้อมูลสถิติได้';
+    return;
+  }
+  creatorCertDataCache = res;
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div style="display:flex; gap:1rem; flex-wrap:wrap; font-weight:600;">
+        <span>📚 บทเรียนทั้งหมด: <strong>${res.total_lessons || 0}</strong> บท</span>
+        <span>👥 ผู้เข้าเรียนรวม: <strong>${res.total_learners || 0}</strong> คน</span>
+        <span>⭐ ดาวเฉลี่ยรวม: <strong>${Number(res.overall_rating || 0).toFixed(2)} / 5.0</strong> (${res.total_ratings || 0} รีวิว)</span>
+      </div>
+    `;
+  }
+
+  if (commentsEl) {
+    const comments = res.comments || [];
+    if (!comments.length) {
+      commentsEl.innerHTML = '<span style="color:var(--muted);">ยังไม่มีข้อคิดเห็นในช่วงเวลาที่เลือก</span>';
+    } else {
+      commentsEl.innerHTML = comments.map(c => `
+        <label style="display:flex; align-items:flex-start; gap:0.5rem; padding:0.4rem 0.55rem; border-radius:6px; border:1px solid var(--border); background:var(--card); cursor:pointer;">
+          <input type="checkbox" class="ccCommentCheck" value="${c.id}" checked style="margin-top:0.2rem;">
+          <div style="flex:1; line-height:1.4;">
+            <div style="font-size:0.76rem; color:var(--primary); font-weight:700;">
+              ${escapeHtml(c.lesson_title)} • ${'★'.repeat(c.rating)}${'☆'.repeat(5 - c.rating)} (${escapeHtml(c.date_text)})
+            </div>
+            <div style="color:var(--text); margin-top:0.15rem;">"${escapeHtml(c.comment)}"</div>
+          </div>
+        </label>
+      `).join('');
+    }
+  }
+}
+
+function toggleAllCreatorComments(checked) {
+  document.querySelectorAll('.ccCommentCheck').forEach(el => { el.checked = checked; });
+}
+
+function formatThaiDateShort(isoDate) {
+  if (!isoDate) return '';
+  const d = new Date(isoDate + 'T00:00:00');
+  if (isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function printCreatorCertificateA4() {
+  if (!creatorCertDataCache) return;
+  const creatorName = (document.getElementById('ccCreatorNameInput')?.value || '').trim() || (currentUser ? currentUser.name : 'ผู้สร้างบทเรียน');
+  const startVal = document.getElementById('ccStartDateInput')?.value || '';
+  const endVal = document.getElementById('ccEndDateInput')?.value || '';
+  const sigId = Number(document.getElementById('ccSignatorySelect')?.value || 0);
+  const selectedSig = sigId ? allSignatoriesCache.filter(s => s.id === sigId) : [];
+
+  let periodLabel = 'ตลอดระยะเวลาทั้งหมด';
+  if (startVal && endVal) periodLabel = `${formatThaiDateShort(startVal)} ถึง ${formatThaiDateShort(endVal)}`;
+  else if (startVal) periodLabel = `ตั้งแต่ ${formatThaiDateShort(startVal)} เป็นต้นไป`;
+  else if (endVal) periodLabel = `จนถึง ${formatThaiDateShort(endVal)}`;
+
+  const lessons = creatorCertDataCache.lessons || [];
+  const selectedCommentIds = new Set(
+    Array.from(document.querySelectorAll('.ccCommentCheck:checked')).map(el => Number(el.value))
+  );
+  const filteredComments = (creatorCertDataCache.comments || []).filter(c => selectedCommentIds.has(c.id));
+  const issuedDate = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const lessonRowsHTML = lessons.map((l, idx) => `
+    <tr>
+      <td style="border:1px solid #cbd5e1; padding:6px 8px; text-align:center;">${idx + 1}</td>
+      <td style="border:1px solid #cbd5e1; padding:6px 8px; font-weight:600; color:#0f172a;">${escapeHtml(l.title)}</td>
+      <td style="border:1px solid #cbd5e1; padding:6px 8px; text-align:center;">${l.learner_count || 0} คน</td>
+      <td style="border:1px solid #cbd5e1; padding:6px 8px; text-align:center;">
+        ${l.total_ratings > 0 ? `⭐ ${Number(l.average_rating).toFixed(2)} (${l.total_ratings})` : '-'}
+      </td>
+    </tr>
+  `).join('');
+
+  const commentsHTML = filteredComments.length > 0
+    ? filteredComments.map((c, idx) => `
+        <div style="padding:8px 12px; border:1px solid #cbd5e1; border-left:4px solid #0284c7; border-radius:6px; background:#f8fafc; margin-bottom:8px; break-inside:avoid;">
+          <div style="display:flex; justify-content:space-between; font-size:11px; color:#0369a1; font-weight:700; margin-bottom:3px;">
+            <span>#${idx + 1} • ${escapeHtml(c.lesson_title)}</span>
+            <span>${'★'.repeat(c.rating)}${'☆'.repeat(5 - c.rating)} (${escapeHtml(c.date_text)})</span>
+          </div>
+          <div style="font-size:12.5px; color:#0f172a; line-height:1.5;">"${escapeHtml(c.comment)}"</div>
+        </div>
+      `).join('')
+    : `<div style="text-align:center; padding:30px; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px;">ไม่มีข้อคิดเห็นที่เลือกแสดงในหน้านี้</div>`;
+
+  const html = `
+    <style>
+      @media print {
+        @page { size: A4 portrait; margin: 10mm; }
+      }
+      .cc-a4-page {
+        width: 190mm;
+        min-height: 274mm;
+        margin: 0 auto 14px auto;
+        padding: 14mm 14mm;
+        background: #ffffff;
+        color: #0f172a;
+        border: 3px double #0284c7;
+        border-radius: 8px;
+        box-sizing: border-box;
+        font-family: 'Prompt', sans-serif;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .cc-a4-break { page-break-after: always; }
+    </style>
+
+    <!-- PAGE 1: A4 PORTRAIT -->
+    <div class="cc-a4-page cc-a4-break">
+      <div>
+        <div style="text-align:center; border-bottom:2px solid #e0f2fe; padding-bottom:12px; margin-bottom:14px;">
+          <img src="logo.svg" alt="Logo" style="width:54px; height:54px; display:block; margin:0 auto 6px;">
+          <div style="font-size:12px; font-weight:700; color:#0369a1;">งานการพยาบาลผู้ป่วยพิเศษ 2-3 ฝ่ายการพยาบาล โรงพยาบาลศรีนครินทร์ คณะแพทยศาสตร์ มหาวิทยาลัยขอนแก่น</div>
+          <h2 style="font-size:21px; font-weight:800; color:#0f172a; margin:6px 0 2px;">วุฒิบัตรรับรองผู้สร้างบทเรียนออนไลน์</h2>
+          <div style="font-size:11.5px; color:#64748b;">CREATOR ACHIEVEMENT &amp; TEACHING PORTFOLIO CERTIFICATE</div>
+        </div>
+
+        <div style="text-align:center; margin-bottom:14px;">
+          <div style="font-size:12.5px; color:#475569;">ขอมอบวุฒิบัตรฉบับนี้ไว้เพื่อแสดงว่า</div>
+          <div style="font-size:22px; font-weight:800; color:#0284c7; margin:4px 0;">${escapeHtml(creatorName)}</div>
+          <div style="font-size:12px; color:#334155;">ได้สร้างและพัฒนาบทเรียนออนไลน์ทางการพยาบาล ช่วงเวลา: <strong>${escapeHtml(periodLabel)}</strong></div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:14px;">
+          <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:8px; text-align:center;">
+            <div style="font-size:18px; font-weight:800; color:#0284c7;">${creatorCertDataCache.total_lessons || 0}</div>
+            <div style="font-size:11px; color:#475569;">บทเรียนที่สร้าง</div>
+          </div>
+          <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:8px; text-align:center;">
+            <div style="font-size:18px; font-weight:800; color:#059669;">${creatorCertDataCache.total_learners || 0}</div>
+            <div style="font-size:11px; color:#475569;">ผู้เข้าเรียนรวม (คน)</div>
+          </div>
+          <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px; text-align:center;">
+            <div style="font-size:18px; font-weight:800; color:#d97706;">⭐ ${Number(creatorCertDataCache.overall_rating || 0).toFixed(2)}</div>
+            <div style="font-size:11px; color:#475569;">ดาวเฉลี่ย (${creatorCertDataCache.total_ratings || 0} รีวิว)</div>
+          </div>
+        </div>
+
+        <div style="font-size:12.5px; font-weight:700; color:#0f172a; margin-bottom:6px;">📚 รายชื่อบทเรียนและสถิติผลการดำเนินการ</div>
+        <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+          <thead>
+            <tr style="background:#e0f2fe; color:#0369a1;">
+              <th style="border:1px solid #bae6fd; padding:6px 8px; width:42px;">ลำดับ</th>
+              <th style="border:1px solid #bae6fd; padding:6px 8px; text-align:left;">ชื่อบทเรียน</th>
+              <th style="border:1px solid #bae6fd; padding:6px 8px; width:95px;">ผู้เข้าเรียน</th>
+              <th style="border:1px solid #bae6fd; padding:6px 8px; width:105px;">ดาวเฉลี่ย</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lessonRowsHTML || '<tr><td colspan="4" style="border:1px solid #cbd5e1; padding:12px; text-align:center; color:#64748b;">ยังไม่มีบทเรียน</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:18px; padding-top:12px; border-top:1px solid #e2e8f0;">
+        <div style="font-size:11px; color:#64748b;">
+          <div>ออกให้ ณ วันที่ ${escapeHtml(issuedDate)}</div>
+          <div>เอกสารชุดที่ 1/2 • สรุปผลงานและสถิติผู้เรียน</div>
+        </div>
+        <div>
+          ${renderCertificateSignatoriesHTML(selectedSig)}
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE 2: A4 PORTRAIT (COMMENTS APPENDIX) -->
+    <div class="cc-a4-page">
+      <div>
+        <div style="border-bottom:2px solid #e0f2fe; padding-bottom:10px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="font-size:17px; font-weight:800; color:#0f172a; margin:0;">💬 ข้อคิดเห็นและข้อเสนอแนะจากผู้เรียน</h3>
+            <div style="font-size:11.5px; color:#475569; margin-top:2px;">ผู้สร้างบทเรียน: <strong>${escapeHtml(creatorName)}</strong> | ช่วงเวลา: ${escapeHtml(periodLabel)}</div>
+          </div>
+          <div style="font-size:11px; font-weight:700; color:#0284c7;">หน้า 2 / 2</div>
+        </div>
+        ${commentsHTML}
+      </div>
+
+      <div style="display:flex; justify-content:space-between; font-size:11px; color:#64748b; padding-top:10px; border-top:1px solid #e2e8f0;">
+        <span>แสดงข้อคิดเห็นที่คัดเลือกจำนวน ${filteredComments.length} รายการ (ไม่ระบุตัวตนผู้เรียน)</span>
+        <span>ออกให้ ณ วันที่ ${escapeHtml(issuedDate)}</span>
+      </div>
+    </div>
+  `;
+
+  closeCreatorCertificateModal();
+  openPrintPreviewModal(`วุฒิบัตรผู้สร้าง: ${creatorName}`, html);
 }

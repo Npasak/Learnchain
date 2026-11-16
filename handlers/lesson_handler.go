@@ -619,11 +619,13 @@ func (h *LessonHandler) UpdateLessonSchedule(c *fiber.Ctx) error {
 // ComputeLessonRatingStats aggregates 1-5 star ratings for a lesson without exposing voter identities
 func ComputeLessonRatingStats(lessonID uint, callerUserID uint) models.LessonRatingStatsDTO {
 	var ratings []models.LessonRating
-	database.DB.Where("lesson_id = ?", lessonID).Find(&ratings)
+	database.DB.Where("lesson_id = ?", lessonID).Order("updated_at desc").Find(&ratings)
 
 	counts := map[int]int{1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
 	var sum int
 	myRating := 0
+	myComment := ""
+	var comments []models.LessonRatingCommentDTO
 	for _, r := range ratings {
 		if r.Rating >= 1 && r.Rating <= 5 {
 			counts[r.Rating]++
@@ -631,6 +633,16 @@ func ComputeLessonRatingStats(lessonID uint, callerUserID uint) models.LessonRat
 		}
 		if callerUserID > 0 && r.UserID == callerUserID {
 			myRating = r.Rating
+			myComment = r.Comment
+		}
+		if strings.TrimSpace(r.Comment) != "" {
+			comments = append(comments, models.LessonRatingCommentDTO{
+				ID:        r.ID,
+				LessonID:  r.LessonID,
+				Rating:    r.Rating,
+				Comment:   strings.TrimSpace(r.Comment),
+				CreatedAt: r.UpdatedAt,
+			})
 		}
 	}
 
@@ -646,10 +658,12 @@ func ComputeLessonRatingStats(lessonID uint, callerUserID uint) models.LessonRat
 		TotalRatings:  total,
 		StarCounts:    counts,
 		MyRating:      myRating,
+		MyComment:     myComment,
+		Comments:      comments,
 	}
 }
 
-// RateLesson lets a learner submit or update their 1-5 star rating for a lesson
+// RateLesson lets a learner submit or update their 1-5 star rating and optional comment for a lesson
 func (h *LessonHandler) RateLesson(c *fiber.Ctx) error {
 	userID := middleware.ResolveUserID(c)
 	lessonID, err := strconv.ParseUint(c.Params("lessonId"), 10, 32)
@@ -658,7 +672,8 @@ func (h *LessonHandler) RateLesson(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		Rating int `json:"rating"`
+		Rating  int     `json:"rating"`
+		Comment *string `json:"comment"`
 	}
 	if err := c.BodyParser(&req); err != nil || req.Rating < 1 || req.Rating > 5 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -672,14 +687,25 @@ func (h *LessonHandler) RateLesson(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"success": false, "message": "ไม่พบบทเรียน"})
 	}
 
+	var existing models.LessonRating
+	err = database.DB.Where("lesson_id = ? AND user_id = ?", uint(lessonID), userID).First(&existing).Error
+	commentVal := ""
+	if err == nil {
+		commentVal = existing.Comment
+	}
+	if req.Comment != nil {
+		commentVal = strings.TrimSpace(*req.Comment)
+	}
+
 	record := models.LessonRating{
 		LessonID: uint(lessonID),
 		UserID:   userID,
 		Rating:   req.Rating,
+		Comment:  commentVal,
 	}
 	err = database.DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "lesson_id"}, {Name: "user_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"rating", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"rating", "comment", "updated_at"}),
 	}).Create(&record).Error
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"success": false, "message": err.Error()})
@@ -687,10 +713,11 @@ func (h *LessonHandler) RateLesson(c *fiber.Ctx) error {
 
 	stats := ComputeLessonRatingStats(uint(lessonID), userID)
 	return c.JSON(fiber.Map{
-		"success":   true,
-		"message":   fmt.Sprintf("⭐ บันทึกคะแนน %d ดาวเรียบร้อยแล้ว", req.Rating),
-		"my_rating": req.Rating,
-		"stats":     stats,
+		"success":    true,
+		"message":    fmt.Sprintf("⭐ บันทึกคะแนน %d ดาวเรียบร้อยแล้ว", req.Rating),
+		"my_rating":  req.Rating,
+		"my_comment": commentVal,
+		"stats":      stats,
 	})
 }
 
@@ -713,5 +740,119 @@ func (h *LessonHandler) GetLessonRatings(c *fiber.Ctx) error {
 		"lesson_id":    lesson.ID,
 		"lesson_title": lesson.Title,
 		"stats":        stats,
+	})
+}
+
+// GetCreatorCertificateData returns per-lesson learner counts, average star ratings,
+// and anonymous learner comments filtered by optional start_date & end_date (YYYY-MM-DD).
+func (h *LessonHandler) GetCreatorCertificateData(c *fiber.Ctx) error {
+	startStr := strings.TrimSpace(c.Query("start_date"))
+	endStr := strings.TrimSpace(c.Query("end_date"))
+
+	var startTime, endTime *time.Time
+	if startStr != "" {
+		if t, err := time.ParseInLocation("2006-01-02", startStr, time.Local); err == nil {
+			startTime = &t
+		}
+	}
+	if endStr != "" {
+		if t, err := time.ParseInLocation("2006-01-02", endStr, time.Local); err == nil {
+			eod := t.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			endTime = &eod
+		}
+	}
+
+	var lessons []models.Lesson
+	database.DB.Order("sort_order asc, id asc").Find(&lessons)
+
+	type lessonStatRow struct {
+		LessonID      uint    `json:"lesson_id"`
+		Title         string  `json:"title"`
+		StudyHours    float64 `json:"study_hours"`
+		LearnerCount  int64   `json:"learner_count"`
+		AverageRating float64 `json:"average_rating"`
+		TotalRatings  int64   `json:"total_ratings"`
+	}
+	type commentRow struct {
+		ID          uint   `json:"id"`
+		LessonID    uint   `json:"lesson_id"`
+		LessonTitle string `json:"lesson_title"`
+		Rating      int    `json:"rating"`
+		Comment     string `json:"comment"`
+		DateText    string `json:"date_text"`
+	}
+
+	var rows []lessonStatRow
+	var allComments []commentRow
+	var totalLearners int64
+	var ratingSum float64
+	var ratingCount int64
+
+	for _, l := range lessons {
+		pQuery := database.DB.Model(&models.UserLessonProgress{}).Where("lesson_id = ?", l.ID)
+		if startTime != nil {
+			pQuery = pQuery.Where("updated_at >= ?", *startTime)
+		}
+		if endTime != nil {
+			pQuery = pQuery.Where("updated_at <= ?", *endTime)
+		}
+		var lCount int64
+		pQuery.Distinct("user_id").Count(&lCount)
+		totalLearners += lCount
+
+		rQuery := database.DB.Where("lesson_id = ?", l.ID)
+		if startTime != nil {
+			rQuery = rQuery.Where("updated_at >= ?", *startTime)
+		}
+		if endTime != nil {
+			rQuery = rQuery.Where("updated_at <= ?", *endTime)
+		}
+		var ratings []models.LessonRating
+		rQuery.Order("updated_at desc").Find(&ratings)
+
+		var lSum int
+		for _, r := range ratings {
+			lSum += r.Rating
+			if strings.TrimSpace(r.Comment) != "" {
+				allComments = append(allComments, commentRow{
+					ID:          r.ID,
+					LessonID:    l.ID,
+					LessonTitle: l.Title,
+					Rating:      r.Rating,
+					Comment:     strings.TrimSpace(r.Comment),
+					DateText:    r.UpdatedAt.Format("02/01/2006"),
+				})
+			}
+		}
+		avg := 0.0
+		if len(ratings) > 0 {
+			avg = float64(lSum) / float64(len(ratings))
+			ratingSum += float64(lSum)
+			ratingCount += int64(len(ratings))
+		}
+
+		rows = append(rows, lessonStatRow{
+			LessonID:      l.ID,
+			Title:         l.Title,
+			StudyHours:    l.StudyHours,
+			LearnerCount:  lCount,
+			AverageRating: avg,
+			TotalRatings:  int64(len(ratings)),
+		})
+	}
+
+	overallAvg := 0.0
+	if ratingCount > 0 {
+		overallAvg = ratingSum / float64(ratingCount)
+	}
+
+	return c.JSON(fiber.Map{
+		"success":        true,
+		"lessons":        rows,
+		"comments":       allComments,
+		"total_lessons":  len(rows),
+		"total_learners": totalLearners,
+		"overall_rating": overallAvg,
+		"total_ratings":  ratingCount,
 	})
 }
