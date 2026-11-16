@@ -40,6 +40,7 @@ func InitDB(dbPath string) *gorm.DB {
 		&models.Certificate{},
 		&models.LessonAssignment{},
 		&models.LessonRating{},
+		&models.Signatory{},
 	)
 	if err != nil {
 		log.Fatalf("❌ AutoMigration failed: %v", err)

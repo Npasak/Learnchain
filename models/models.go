@@ -54,9 +54,22 @@ type Lesson struct {
 	PassScorePct    float64              `gorm:"default:70" json:"pass_score_pct"` // เกณฑ์คะแนนผ่าน (%) ที่ผู้สร้างกำหนด
 	DisablePreTest  bool                 `gorm:"default:false" json:"disable_pre_test"`
 	DisablePostTest bool                 `gorm:"default:false" json:"disable_post_test"`
+	SignatoryIDs    string               `gorm:"type:text" json:"signatory_ids"` // JSON array of Signatory IDs selected by creator
 	Quizzes         []Quiz               `gorm:"foreignKey:LessonID;constraint:OnDelete:CASCADE;" json:"quizzes,omitempty"`
 	RatingStats  LessonRatingStatsDTO `gorm:"-" json:"rating_stats"`
 	CreatedAt    time.Time            `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// Signatory represents an authorized certificate signer managed by the Manager.
+type Signatory struct {
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	FullName     string         `gorm:"size:255;not null" json:"full_name"`
+	Position     string         `gorm:"size:255;not null" json:"position"`
+	SignatureURL string         `gorm:"type:text" json:"signature_url"`
+	CreatedByID  uint           `json:"created_by_id"`
+	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
@@ -240,6 +253,7 @@ type CreateLessonRequest struct {
 	PassScorePct    float64         `json:"pass_score_pct"`
 	DisablePreTest  bool            `json:"disable_pre_test"`
 	DisablePostTest bool            `json:"disable_post_test"`
+	SignatoryIDs    string          `json:"signatory_ids"`
 	Quizzes         []CreateQuizDTO `json:"quizzes"`
 }
 
@@ -258,6 +272,7 @@ type UpdateLessonRequest struct {
 	PassScorePct    float64 `json:"pass_score_pct"`
 	DisablePreTest  *bool   `json:"disable_pre_test"`
 	DisablePostTest *bool   `json:"disable_post_test"`
+	SignatoryIDs    *string `json:"signatory_ids"`
 }
 
 type AssignLearnerRequest struct {

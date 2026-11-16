@@ -80,6 +80,7 @@ func main() {
 	lifecycleHandler := handlers.NewLifecycleHandler()
 	godVaultHandler := handlers.NewGodVaultHandler()
 	versionHandler := handlers.NewVersionHandler(cfg, updaterService, triggerQuit)
+	signatoryHandler := handlers.NewSignatoryHandler()
 
 	// 5. Initialize Fiber App
 	app := fiber.New(fiber.Config{
@@ -136,6 +137,13 @@ func main() {
 	// Quizzes (IsCorrect sanitization & grading)
 	api.Get("/quizzes/:quizId", quizHandler.GetQuiz)
 	api.Post("/quizzes/:quizId/submit", quizHandler.SubmitQuiz)
+
+	// Certificate Signatories (Manager manages list; Creator selects per lesson)
+	api.Get("/signatories", signatoryHandler.ListSignatories)
+	api.Post("/signatories/upload", signatoryHandler.UploadSignatureImage)
+	api.Post("/signatories", signatoryHandler.CreateSignatory)
+	api.Put("/signatories/:id", signatoryHandler.UpdateSignatory)
+	api.Delete("/signatories/:id", signatoryHandler.DeleteSignatory)
 
 	// Soulbound Certificate Minting & Verification
 	api.Get("/certificates/my", certHandler.GetMyCertificates)

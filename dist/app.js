@@ -722,9 +722,10 @@ function createLearnerLessonCard(l, isAssignedSection) {
   `;
 }
 
-function printLessonCertificate(lessonId) {
+async function printLessonCertificate(lessonId) {
   const l = allLearnerLessons.find(x => x.id === lessonId);
   if (!l) return;
+  await loadSignatoriesCache();
   const cert = l.certificate || {};
   const tokenId     = cert.token_id || `SBT-${l.course_id || 1}-${l.id}-${currentUserID}`;
   const title       = l.title || cert.lesson_title || 'บทเรียน';
@@ -733,8 +734,9 @@ function printLessonCertificate(lessonId) {
   const issuedDate  = cert.issued_at ? new Date(cert.issued_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const studyHours  = l.study_hours || cert.study_hours || 1;
   const durationSec = l.duration_sec || cert.lesson_duration_sec || 60;
+  const signatories = resolveSignatoriesByIDs(l.signatory_ids);
 
-  printCertificate(tokenId, title, recipient, txHash, issuedDate, studyHours, durationSec);
+  printCertificate(tokenId, title, recipient, txHash, issuedDate, studyHours, durationSec, signatories);
 }
 
 async function emailLessonCertificate(lessonId) {
@@ -926,7 +928,7 @@ function triggerNativePrint() {
   }, 150);
 }
 
-function printCertificate(tokenId, courseTitle, recipient, txHash, issuedDate, studyHours = 1, durationSec = 60) {
+function printCertificate(tokenId, courseTitle, recipient, txHash, issuedDate, studyHours = 1, durationSec = 60, signatories = []) {
   const walletAddr = currentUser && currentUser.wallet_address ? currentUser.wallet_address : '0xVerifiedSoulboundLearner';
   const walletShort = walletAddr.length > 20 ? `${walletAddr.slice(0, 10)}...${walletAddr.slice(-8)}` : walletAddr;
   const txDisplay = txHash && txHash.length > 22 ? `${txHash.slice(0, 14)}...${txHash.slice(-10)}` : (txHash || 'บันทึกบนบล็อกเชนแล้ว');
@@ -998,14 +1000,8 @@ function printCertificate(tokenId, courseTitle, recipient, txHash, issuedDate, s
             </div>
           </div>
 
-          <!-- Right: Issuing Nursing Department Signature -->
-          <div style="text-align:center; padding:4px 8px;">
-            <div style="font-size:13px; font-weight:700; color:#0284c7; border-bottom:1.5px solid #7dd3fc; padding-bottom:6px; margin-bottom:6px;">
-              งานการพยาบาลผู้ป่วยพิเศษ 2-3 ฝ่ายการพยาบาล
-            </div>
-            <div style="font-size:11.5px; font-weight:700; color:#0f172a;">โรงพยาบาลศรีนครินทร์ คณะแพทยศาสตร์</div>
-            <div style="font-size:11px; font-weight:600; color:#0369a1;">มหาวิทยาลัยขอนแก่น</div>
-          </div>
+          <!-- Right: Signatories (or Issuing Nursing Department Fallback) -->
+          ${renderCertificateSignatoriesHTML(signatories)}
         </div>
       </div>
     </div>
@@ -1188,6 +1184,7 @@ function openEditLessonModal(lessonId) {
     noPostEl.checked = !hasPost;
   }
 
+  renderLessonSignatoryCheckboxes('editLessonSignatoriesBox', 'editSigCheck', l.signatory_ids);
   document.getElementById('editLessonModal').classList.remove('hidden');
 }
 
@@ -1246,7 +1243,8 @@ async function submitEditLesson(e) {
     is_hidden: document.getElementById('editLessonIsHidden').value === 'true',
     pass_score_pct: parseFloat(document.getElementById('editLessonPassScore')?.value) || 70,
     disable_pre_test: !!(document.getElementById('editLessonDisablePreTest')?.checked),
-    disable_post_test: !!(document.getElementById('editLessonDisablePostTest')?.checked)
+    disable_post_test: !!(document.getElementById('editLessonDisablePostTest')?.checked),
+    signatory_ids: collectSelectedSignatoryIDs('editSigCheck')
   };
 
   const res = await fetchJSON(`/api/lessons/${id}`, 'PUT', payload);
@@ -2652,6 +2650,7 @@ function openCreateLessonModal() {
   document.getElementById('newOpenPeriod').value = 'เปิดตลอดเวลา';
   const newHoursEl = document.getElementById('newStudyHours');
   if (newHoursEl) newHoursEl.value = 1;
+  renderLessonSignatoryCheckboxes('newLessonSignatoriesBox', 'newSigCheck', '');
 
   if (preQuestions.length === 0) {
     preQuestions = [{
@@ -2795,6 +2794,7 @@ async function submitNewLesson(e) {
       pass_score_pct: passScorePct,
       disable_pre_test: !hasPreTest,
       disable_post_test: !hasPostTest,
+      signatory_ids: collectSelectedSignatoryIDs('newSigCheck'),
       quizzes: quizzesPayload
     };
 
@@ -4157,4 +4157,223 @@ async function applyAppUpdate() {
 
 document.addEventListener('DOMContentLoaded', () => {
   loadAppVersionBadge();
+  loadSignatoriesCache();
 });
+
+// ============================================================
+// CERTIFICATE SIGNATORIES (MANAGER CRUD + CREATOR SELECTION)
+// ============================================================
+let allSignatoriesCache = [];
+
+async function loadSignatoriesCache() {
+  try {
+    const res = await fetchJSON('/api/signatories');
+    if (res && res.success && Array.isArray(res.signatories)) {
+      allSignatoriesCache = res.signatories;
+    }
+  } catch (_) {}
+  return allSignatoriesCache;
+}
+
+function parseSignatoryIDs(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(Number).filter(Boolean);
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(Number).filter(Boolean);
+  } catch (_) {}
+  return String(raw).split(',').map(s => Number(s.trim())).filter(Boolean);
+}
+
+function resolveSignatoriesByIDs(raw) {
+  const ids = parseSignatoryIDs(raw);
+  if (!ids.length) return [];
+  return ids.map(id => allSignatoriesCache.find(s => s.id === id)).filter(Boolean);
+}
+
+function renderCertificateSignatoriesHTML(signatories) {
+  if (!signatories || signatories.length === 0) {
+    return `
+      <div style="text-align:center; padding:4px 8px;">
+        <div style="font-size:13px; font-weight:700; color:#0284c7; border-bottom:1.5px solid #7dd3fc; padding-bottom:6px; margin-bottom:6px;">
+          งานการพยาบาลผู้ป่วยพิเศษ 2-3 ฝ่ายการพยาบาล
+        </div>
+        <div style="font-size:11.5px; font-weight:700; color:#0f172a;">โรงพยาบาลศรีนครินทร์ คณะแพทยศาสตร์</div>
+        <div style="font-size:11px; font-weight:600; color:#0369a1;">มหาวิทยาลัยขอนแก่น</div>
+      </div>
+    `;
+  }
+  const items = signatories.map(s => `
+    <div style="text-align:center; padding:2px 8px; min-width:140px;">
+      ${s.signature_url
+        ? `<img src="${escapeHtml(s.signature_url)}" alt="ลายเซ็น" style="max-height:44px; max-width:150px; object-fit:contain; display:block; margin:0 auto 2px;">`
+        : `<div style="height:28px;"></div>`}
+      <div style="border-top:1.5px solid #0284c7; padding-top:4px; margin-top:2px; font-size:11.5px; font-weight:700; color:#0f172a;">
+        (${escapeHtml(s.full_name)})
+      </div>
+      <div style="font-size:10.5px; font-weight:600; color:#0369a1;">
+        ${escapeHtml(s.position)}
+      </div>
+    </div>
+  `).join('');
+  return `<div style="display:flex; justify-content:center; align-items:flex-end; gap:14px; flex-wrap:wrap;">${items}</div>`;
+}
+
+async function renderLessonSignatoryCheckboxes(containerId, checkboxClass, existingRaw) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  await loadSignatoriesCache();
+  const selectedIds = new Set(parseSignatoryIDs(existingRaw));
+
+  if (!allSignatoriesCache.length) {
+    box.innerHTML = `<span style="color:var(--muted);">ยังไม่มีรายชื่อผู้ลงนาม (ผู้จัดการสามารถเพิ่มได้ที่เมนู "✍️ ผู้ลงนามวุฒิบัตร")</span>`;
+    return;
+  }
+
+  box.innerHTML = allSignatoriesCache.map(s => `
+    <label style="display:flex; align-items:center; gap:0.55rem; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid var(--border); background:var(--card); cursor:pointer;">
+      <input type="checkbox" class="${checkboxClass}" value="${s.id}" ${selectedIds.has(s.id) ? 'checked' : ''}>
+      ${s.signature_url ? `<img src="${escapeHtml(s.signature_url)}" alt="sig" style="height:24px; max-width:72px; object-fit:contain; background:#fff; border-radius:4px; padding:1px;">` : ''}
+      <div style="flex:1; line-height:1.3;">
+        <div style="font-weight:700; color:var(--text);">${escapeHtml(s.full_name)}</div>
+        <div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(s.position)}</div>
+      </div>
+    </label>
+  `).join('');
+}
+
+function collectSelectedSignatoryIDs(checkboxClass) {
+  const checked = Array.from(document.querySelectorAll(`.${checkboxClass}:checked`))
+    .map(el => Number(el.value))
+    .filter(Boolean);
+  return JSON.stringify(checked);
+}
+
+async function openSignatoriesModal() {
+  const modal = document.getElementById('signatoriesModal');
+  if (modal) modal.classList.remove('hidden');
+  resetSignatoryForm();
+  await refreshSignatoriesListUI();
+}
+
+function closeSignatoriesModal() {
+  const modal = document.getElementById('signatoriesModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function refreshSignatoriesListUI() {
+  const listEl = document.getElementById('signatoriesListContainer');
+  if (!listEl) return;
+  await loadSignatoriesCache();
+  if (!allSignatoriesCache.length) {
+    listEl.innerHTML = `<div style="color:var(--muted); font-size:0.84rem;">ยังไม่มีผู้ลงนามในระบบ กรุณาเพิ่มด้านบน</div>`;
+    return;
+  }
+  listEl.innerHTML = allSignatoriesCache.map(s => `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.6rem 0.75rem; border-radius:8px; border:1px solid var(--border); background:var(--bg); flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:0.75rem;">
+        ${s.signature_url
+          ? `<img src="${escapeHtml(s.signature_url)}" alt="sig" style="height:40px; max-width:110px; object-fit:contain; background:#fff; border:1px solid var(--border); border-radius:6px; padding:2px;">`
+          : `<div style="width:80px; height:40px; display:flex; align-items:center; justify-content:center; border:1px dashed var(--border); border-radius:6px; font-size:0.72rem; color:var(--muted);">ไม่มีรูป</div>`}
+        <div>
+          <div style="font-weight:700; font-size:0.88rem; color:var(--text);">${escapeHtml(s.full_name)}</div>
+          <div style="font-size:0.78rem; color:var(--muted);">${escapeHtml(s.position)}</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:0.4rem;">
+        <button type="button" class="btn btn-sm btn-wallet" onclick="editSignatoryItem(${s.id})">✏️ แก้ไข</button>
+        <button type="button" class="btn btn-sm" style="background:rgba(239,68,68,0.12); color:#dc2626;" onclick="deleteSignatoryItem(${s.id})">🗑️ ลบ</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function previewAndUploadSignature(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+
+  const res = await fetch('/api/signatories/upload', {
+    method: 'POST',
+    headers: {
+      'X-User-ID': String(currentUserID || ''),
+      'X-Wallet-Address': String(currentWallet || '')
+    },
+    body: fd
+  });
+  const data = await res.json();
+  if (data && data.success && data.signature_url) {
+    document.getElementById('sigImageUrlInput').value = data.signature_url;
+    const prev = document.getElementById('sigPreviewImg');
+    if (prev) {
+      prev.src = data.signature_url;
+      prev.classList.remove('hidden');
+    }
+  } else {
+    alert('❌ ' + ((data && data.error) || 'อัปโหลดรูปลายเซ็นไม่สำเร็จ'));
+  }
+}
+
+function resetSignatoryForm() {
+  document.getElementById('sigEditId').value = '';
+  document.getElementById('sigFullNameInput').value = '';
+  document.getElementById('sigPositionInput').value = '';
+  document.getElementById('sigImageUrlInput').value = '';
+  const f = document.getElementById('sigFileInput');
+  if (f) f.value = '';
+  const prev = document.getElementById('sigPreviewImg');
+  if (prev) { prev.src = ''; prev.classList.add('hidden'); }
+  const titleEl = document.getElementById('sigFormTitle');
+  if (titleEl) titleEl.innerText = '➕ เพิ่มผู้ลงนามใหม่';
+  const cancelBtn = document.getElementById('btnCancelSigEdit');
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+}
+
+function editSignatoryItem(id) {
+  const s = allSignatoriesCache.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('sigEditId').value = s.id;
+  document.getElementById('sigFullNameInput').value = s.full_name || '';
+  document.getElementById('sigPositionInput').value = s.position || '';
+  document.getElementById('sigImageUrlInput').value = s.signature_url || '';
+  const prev = document.getElementById('sigPreviewImg');
+  if (prev && s.signature_url) {
+    prev.src = s.signature_url;
+    prev.classList.remove('hidden');
+  }
+  const titleEl = document.getElementById('sigFormTitle');
+  if (titleEl) titleEl.innerText = `✏️ แก้ไขผู้ลงนาม #${s.id}`;
+  const cancelBtn = document.getElementById('btnCancelSigEdit');
+  if (cancelBtn) cancelBtn.classList.remove('hidden');
+}
+
+async function submitSignatoryForm(e) {
+  e.preventDefault();
+  const editId = document.getElementById('sigEditId').value;
+  const payload = {
+    full_name: document.getElementById('sigFullNameInput').value.trim(),
+    position: document.getElementById('sigPositionInput').value.trim(),
+    signature_url: document.getElementById('sigImageUrlInput').value.trim()
+  };
+
+  const url = editId ? `/api/signatories/${editId}` : '/api/signatories';
+  const method = editId ? 'PUT' : 'POST';
+  const res = await fetchJSON(url, method, payload);
+  if (res && res.success) {
+    resetSignatoryForm();
+    await refreshSignatoriesListUI();
+  } else {
+    alert('❌ ' + ((res && res.error) || 'บันทึกผู้ลงนามไม่สำเร็จ'));
+  }
+}
+
+async function deleteSignatoryItem(id) {
+  if (!confirm('ยืนยันลบรายชื่อผู้ลงนามนี้?')) return;
+  const res = await fetchJSON(`/api/signatories/${id}`, 'DELETE');
+  if (res && res.success) {
+    await refreshSignatoriesListUI();
+  } else {
+    alert('❌ ' + ((res && res.error) || 'ลบไม่สำเร็จ'));
+  }
+}

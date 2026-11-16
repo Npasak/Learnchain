@@ -323,6 +323,7 @@ func (h *LessonHandler) CreateLesson(c *fiber.Ctx) error {
 		YoutubeURL:   strings.TrimSpace(req.YoutubeURL),
 		DocumentURL:  strings.TrimSpace(req.DocumentURL),
 		DurationSec:  req.DurationSec,
+		SignatoryIDs: strings.TrimSpace(req.SignatoryIDs),
 		StudyHours:   req.StudyHours,
 		SortOrder:    req.SortOrder,
 		IsHidden:     req.IsHidden,
@@ -506,6 +507,9 @@ func (h *LessonHandler) UpdateLesson(c *fiber.Ctx) error {
 		} else {
 			lesson.PassScorePct = req.PassScorePct
 		}
+	}
+	if req.SignatoryIDs != nil {
+		lesson.SignatoryIDs = strings.TrimSpace(*req.SignatoryIDs)
 	}
 	if req.DisablePreTest != nil {
 		lesson.DisablePreTest = *req.DisablePreTest
