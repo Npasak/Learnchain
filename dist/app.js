@@ -3210,7 +3210,7 @@ async function importSyncSnapshotFile(event) {
 }
 
 async function refreshCurrentPortalAfterSync() {
-  if (!isAuthenticated || !currentUserID) return;
+  if (!currentUser || !currentUserID) return;
   await fetchCurrentUser();
   if (activeRole === 'learner') {
     await loadLearnerDashboard();
