@@ -606,9 +606,11 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	if !strings.Contains(gasEndpoint, "script.google.com") {
 		gasEndpoint = DefaultGASSignalingURL
 	}
+	var signalOK bool
 	if gasEndpoint != "" {
 		signalNodes, sigErr := h.sendGASSignal(gasEndpoint, nodeID, hostname, primaryLanURL, lanURLs, timeoutSec, isSelfMaster, selfScore, localSnap)
 		if sigErr == nil {
+			signalOK = true
 			h.mu.Lock()
 			h.gasStatus = "connected"
 			h.gasStatusText = "เชื่อมต่อ GAS Signaling ปกติ"
@@ -632,6 +634,7 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	h.touchSelfNode()
 	allNodes := h.pruneExpiredNodesLocked()
 	electedMaster := h.electSingleMasterLocked(allNodes, preferredMasterID)
+	selfIsMasterNow := h.isSelfMaster
 	h.mu.Unlock()
 
 	var hubResp hubSyncResponse
@@ -687,7 +690,36 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 		}
 	}
 
-	// Step D: Automatic GAS Fallback ONLY if direct LAN/WiFi/IP transfer failed or no LAN peers exist
+	// Step D: If this machine IS the Master and no other peers are online/reachable yet,
+	// Master simply stays ready on LAN/WiFi and keeps lightweight GAS Signaling active (no heavy GAS fallback upload!).
+	if !directSuccess && selfIsMasterNow {
+		h.mu.Lock()
+		h.touchSelfNode()
+		activeList := h.pruneExpiredNodesLocked()
+		h.updateKnownPeersLocked(activeList)
+		if signalOK {
+			h.syncSuccessCount++
+			h.syncTransport = "Master Ready (LAN/WiFi + GAS Signaling)"
+			h.lastSyncAt = time.Now().Format("15:04:05")
+			h.lastSyncStatus = fmt.Sprintf("✅ Master พร้อมรับการเชื่อมต่อ (GAS Signaling ปกติ • ออนไลน์ %d เครื่อง)", len(activeList))
+		} else {
+			h.syncTransport = "Master Ready (LAN/WiFi Only)"
+			h.lastSyncAt = time.Now().Format("15:04:05")
+			h.lastSyncStatus = fmt.Sprintf("🟡 Master พร้อมรับการเชื่อมต่อบน LAN (GAS ไม่ตอบสนอง • ออนไลน์ %d เครื่อง)", len(activeList))
+		}
+		h.mu.Unlock()
+
+		return fiber.Map{
+			"success":          true,
+			"message":          h.lastSyncStatus,
+			"online_count":     len(activeList),
+			"active_nodes":     activeList,
+			"last_sync_at":     h.lastSyncAt,
+			"last_sync_status": h.lastSyncStatus,
+		}, nil
+	}
+
+	// Step E: Automatic GAS Fallback ONLY for Peers when direct LAN/WiFi/IP transfer failed
 	if !directSuccess {
 		fallbackURL := gasEndpoint
 		if fallbackURL == "" {
