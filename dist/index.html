@@ -424,7 +424,7 @@
             <button class="btn btn-sm btn-primary" onclick="openMemberManagementModal()">
               👥 จัดการสมาชิก
             </button>
-            <button class="btn btn-sm btn-mint" onclick="openSignatoriesModal()">
+            <button class="btn btn-sm btn-primary" onclick="openSignatoriesModal()">
               ✍️ ผู้ลงนามวุฒิบัตร
             </button>
             <button id="btnPortalGodVault" class="btn btn-sm hidden" style="background:linear-gradient(135deg,#1e1b4b,#312e81); color:#fde047; border:1px solid rgba(250,204,21,0.55); font-weight:700;" onclick="openGodVaultModal()">
@@ -1511,6 +1511,7 @@
               <input type="hidden" id="sigImageUrlInput" value="">
               <img id="sigPreviewImg" src="" alt="ตัวอย่างลายเซ็น" class="hidden" style="max-height:48px; max-width:150px; object-fit:contain; background:#fff; border:1px solid var(--border); border-radius:6px; padding:3px;">
             </div>
+            <div id="sigUploadStatus" style="font-size:0.78rem; color:var(--muted); margin-top:0.25rem;"></div>
           </div>
           <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
             <button type="button" id="btnCancelSigEdit" class="btn btn-sm btn-wallet hidden" onclick="resetSignatoryForm()">ยกเลิกแก้ไข</button>

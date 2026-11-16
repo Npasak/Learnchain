@@ -4288,12 +4288,9 @@ async function refreshSignatoriesListUI() {
   `).join('');
 }
 
-async function previewAndUploadSignature(event) {
-  const file = event.target.files && event.target.files[0];
-  if (!file) return;
+async function uploadSignatureFile(file) {
   const fd = new FormData();
   fd.append('file', file);
-
   const res = await fetch('/api/signatories/upload', {
     method: 'POST',
     headers: {
@@ -4302,16 +4299,54 @@ async function previewAndUploadSignature(event) {
     },
     body: fd
   });
-  const data = await res.json();
-  if (data && data.success && data.signature_url) {
-    document.getElementById('sigImageUrlInput').value = data.signature_url;
-    const prev = document.getElementById('sigPreviewImg');
-    if (prev) {
-      prev.src = data.signature_url;
-      prev.classList.remove('hidden');
+  return await res.json();
+}
+
+async function previewAndUploadSignature(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('sigUploadStatus');
+  const saveBtn = document.getElementById('btnSaveSignatory');
+  const prev = document.getElementById('sigPreviewImg');
+
+  if (prev) {
+    prev.src = URL.createObjectURL(file);
+    prev.classList.remove('hidden');
+  }
+  if (statusEl) {
+    statusEl.style.color = 'var(--muted)';
+    statusEl.innerText = '⏳ กำลังอัปโหลดรูปลายเซ็น...';
+  }
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    const data = await uploadSignatureFile(file);
+    if (data && data.success && data.signature_url) {
+      document.getElementById('sigImageUrlInput').value = data.signature_url;
+      if (prev) {
+        prev.src = data.signature_url;
+        prev.classList.remove('hidden');
+      }
+      if (statusEl) {
+        statusEl.style.color = '#059669';
+        statusEl.innerText = '✅ อัปโหลดรูปลายเซ็นเรียบร้อยแล้ว';
+      }
+    } else {
+      const msg = (data && data.error) || 'อัปโหลดรูปลายเซ็นไม่สำเร็จ';
+      if (statusEl) {
+        statusEl.style.color = '#dc2626';
+        statusEl.innerText = '❌ ' + msg;
+      }
+      alert('❌ ' + msg);
     }
-  } else {
-    alert('❌ ' + ((data && data.error) || 'อัปโหลดรูปลายเซ็นไม่สำเร็จ'));
+  } catch (err) {
+    if (statusEl) {
+      statusEl.style.color = '#dc2626';
+      statusEl.innerText = '❌ อัปโหลดไม่สำเร็จ: ' + err.message;
+    }
+    alert('❌ อัปโหลดไม่สำเร็จ: ' + err.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -4324,6 +4359,8 @@ function resetSignatoryForm() {
   if (f) f.value = '';
   const prev = document.getElementById('sigPreviewImg');
   if (prev) { prev.src = ''; prev.classList.add('hidden'); }
+  const statusEl = document.getElementById('sigUploadStatus');
+  if (statusEl) statusEl.innerText = '';
   const titleEl = document.getElementById('sigFormTitle');
   if (titleEl) titleEl.innerText = '➕ เพิ่มผู้ลงนามใหม่';
   const cancelBtn = document.getElementById('btnCancelSigEdit');
@@ -4341,7 +4378,12 @@ function editSignatoryItem(id) {
   if (prev && s.signature_url) {
     prev.src = s.signature_url;
     prev.classList.remove('hidden');
+  } else if (prev) {
+    prev.src = '';
+    prev.classList.add('hidden');
   }
+  const statusEl = document.getElementById('sigUploadStatus');
+  if (statusEl) statusEl.innerText = s.signature_url ? '✅ มีรูปลายเซ็นเดิมอยู่แล้ว (เลือกไฟล์ใหม่เพื่อเปลี่ยน)' : '';
   const titleEl = document.getElementById('sigFormTitle');
   if (titleEl) titleEl.innerText = `✏️ แก้ไขผู้ลงนาม #${s.id}`;
   const cancelBtn = document.getElementById('btnCancelSigEdit');
@@ -4350,21 +4392,38 @@ function editSignatoryItem(id) {
 
 async function submitSignatoryForm(e) {
   e.preventDefault();
-  const editId = document.getElementById('sigEditId').value;
-  const payload = {
-    full_name: document.getElementById('sigFullNameInput').value.trim(),
-    position: document.getElementById('sigPositionInput').value.trim(),
-    signature_url: document.getElementById('sigImageUrlInput').value.trim()
-  };
+  const saveBtn = document.getElementById('btnSaveSignatory');
+  if (saveBtn) saveBtn.disabled = true;
 
-  const url = editId ? `/api/signatories/${editId}` : '/api/signatories';
-  const method = editId ? 'PUT' : 'POST';
-  const res = await fetchJSON(url, method, payload);
-  if (res && res.success) {
-    resetSignatoryForm();
-    await refreshSignatoriesListUI();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'บันทึกผู้ลงนามไม่สำเร็จ'));
+  try {
+    let sigUrl = document.getElementById('sigImageUrlInput').value.trim();
+    const fileEl = document.getElementById('sigFileInput');
+    if (!sigUrl && fileEl && fileEl.files && fileEl.files[0]) {
+      const upData = await uploadSignatureFile(fileEl.files[0]);
+      if (upData && upData.success && upData.signature_url) {
+        sigUrl = upData.signature_url;
+        document.getElementById('sigImageUrlInput').value = sigUrl;
+      }
+    }
+
+    const editId = document.getElementById('sigEditId').value;
+    const payload = {
+      full_name: document.getElementById('sigFullNameInput').value.trim(),
+      position: document.getElementById('sigPositionInput').value.trim(),
+      signature_url: sigUrl
+    };
+
+    const url = editId ? `/api/signatories/${editId}` : '/api/signatories';
+    const method = editId ? 'PUT' : 'POST';
+    const res = await fetchJSON(url, method, payload);
+    if (res && res.success) {
+      resetSignatoryForm();
+      await refreshSignatoriesListUI();
+    } else {
+      alert('❌ ' + ((res && res.error) || 'บันทึกผู้ลงนามไม่สำเร็จ'));
+    }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
