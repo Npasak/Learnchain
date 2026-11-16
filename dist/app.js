@@ -734,9 +734,25 @@ async function printLessonCertificate(lessonId) {
   const issuedDate  = cert.issued_at ? new Date(cert.issued_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
   const studyHours  = l.study_hours || cert.study_hours || 1;
   const durationSec = l.duration_sec || cert.lesson_duration_sec || 60;
+  const passPct     = l.pass_score_pct || 70;
   const signatories = resolveSignatoriesByIDs(l.signatory_ids);
 
-  printCertificate(tokenId, title, recipient, txHash, issuedDate, studyHours, durationSec, signatories);
+  printCertificate(tokenId, title, recipient, txHash, issuedDate, studyHours, durationSec, signatories, passPct);
+}
+
+async function printSavedCertificate(certId) {
+  const cert = myCertsCache.find(c => c.id === certId);
+  if (!cert) return;
+  await loadSignatoriesCache();
+  const lessonTitle = cert.lesson_title || (cert.course ? cert.course.title : 'บทเรียน');
+  const issuedDate  = cert.issued_at ? new Date(cert.issued_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : '-';
+  const recipient   = cert.user ? (cert.user.name || cert.user.email || cert.user.wallet_address) : (currentUser ? currentUser.name : '');
+  const matchedLesson = allLearnerLessons.find(x => x.id === cert.lesson_id);
+  const studyHours  = cert.study_hours || (matchedLesson ? matchedLesson.study_hours : 0) || 1;
+  const durationSec = cert.lesson_duration_sec || (matchedLesson ? matchedLesson.duration_sec : 0) || 60;
+  const passPct     = (matchedLesson && matchedLesson.pass_score_pct) ? matchedLesson.pass_score_pct : 70;
+  const signatories = matchedLesson ? resolveSignatoriesByIDs(matchedLesson.signatory_ids) : [];
+  printCertificate(cert.token_id, lessonTitle, recipient, cert.transaction_hash || '', issuedDate, studyHours, durationSec, signatories, passPct);
 }
 
 async function emailLessonCertificate(lessonId) {
@@ -819,7 +835,7 @@ function renderMyCertificatesModal() {
             <div>คะแนนเฉลี่ย: <strong>${(cert.average_score||100).toFixed(1)}%</strong> | ธุรกรรม: <a href="${txHref}" target="_blank" rel="noopener" style="color:var(--primary)">${txShort}</a></div>
           </div>
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-            <button class="btn btn-sm btn-cert-action print" onclick="printCertificate('${escapeHtml(cert.token_id)}', '${escapeHtml(lessonTitle)}', '${escapeHtml(recipient)}', '${escapeHtml(cert.transaction_hash)}', '${escapeHtml(issuedDate)}', ${studyHours}, ${durationSec})">
+            <button class="btn btn-sm btn-cert-action print" onclick="printSavedCertificate(${cert.id})">
               🖨️ พิมพ์
             </button>
             <button class="btn btn-sm btn-primary" onclick="emailCertificate(${cert.id})">
@@ -928,7 +944,7 @@ function triggerNativePrint() {
   }, 150);
 }
 
-function printCertificate(tokenId, courseTitle, recipient, txHash, issuedDate, studyHours = 1, durationSec = 60, signatories = []) {
+function printCertificate(tokenId, courseTitle, recipient, txHash, issuedDate, studyHours = 1, durationSec = 60, signatories = [], passScorePct = 70) {
   const walletAddr = currentUser && currentUser.wallet_address ? currentUser.wallet_address : '0xVerifiedSoulboundLearner';
   const walletShort = walletAddr.length > 20 ? `${walletAddr.slice(0, 10)}...${walletAddr.slice(-8)}` : walletAddr;
   const txDisplay = txHash && txHash.length > 22 ? `${txHash.slice(0, 14)}...${txHash.slice(-10)}` : (txHash || 'บันทึกบนบล็อกเชนแล้ว');
@@ -976,7 +992,7 @@ function printCertificate(tokenId, courseTitle, recipient, txHash, issuedDate, s
 
         <!-- Achievement Pills -->
         <div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap; margin-bottom:24px;">
-          <span style="background:#ecfdf5; border:1px solid #6ee7b7; color:#047857; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:600;">✅ ผ่านเกณฑ์การประเมิน (70%+)</span>
+          <span style="background:#ecfdf5; border:1px solid #6ee7b7; color:#047857; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:600;">✅ ผ่านเกณฑ์การประเมิน (${passScorePct}%+)</span>
           <span style="background:#e0f2fe; border:1px solid #7dd3fc; color:#0369a1; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:600;">⏱️ เวลาเรียนครบ ${hoursVal} ชั่วโมง</span>
           <span style="background:#fefce8; border:1px solid #fde047; color:#a16207; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:600;">🏅 บันทึกบนบล็อกเชน</span>
         </div>
@@ -2547,12 +2563,13 @@ async function submitQuiz(e, quizId, quizType, containerId) {
 
   const isLessonDone = pass && (quizType === 'lesson_post_test' || (res.lesson_progress && res.lesson_progress.is_completed));
   const lessonIdForCert = currentLesson ? currentLesson.id : 0;
+  const requiredPassPct = (currentLesson && currentLesson.pass_score_pct) ? currentLesson.pass_score_pct : 70;
 
   container.innerHTML = `
     <div class="result-box ${pass ? 'pass' : 'fail'}" style="text-align:center; padding:2rem; background:var(--card); border-radius:var(--r); border:1px solid ${pass ? 'var(--success)' : 'var(--danger)'}">
       <div style="font-size:3rem; margin-bottom:0.5rem">${pass ? '🎉' : '❌'}</div>
       <h3 style="color:${pass ? 'var(--success)' : 'var(--danger)'}; margin-bottom:0.5rem">
-        ${pass ? 'คุณสอบผ่านเกณฑ์แล้ว!' : 'ยังไม่ผ่านเกณฑ์ 70%'}
+        ${pass ? 'คุณสอบผ่านเกณฑ์แล้ว!' : `ยังไม่ผ่านเกณฑ์ ${requiredPassPct}%`}
       </h3>
       <p style="font-size:1.2rem; font-weight:600; margin-bottom:1rem">คะแนนของคุณ: ${score} / ${total} (${pct}%)</p>
       <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1.5rem">${res.message}</p>
