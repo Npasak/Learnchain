@@ -45,7 +45,18 @@ function handleRequest(e, body) {
     // 1. อัปเดตรายชื่อเครื่องที่เชื่อมต่อ (ActiveNodes) และลบเครื่องที่ไม่ได้ใช้งานเกินเวลาออกอัตโนมัติ
     var activeNodes = updateAndPruneNodes(ss, body, nowMs, timeoutMs);
 
-    // 2. หากมีข้อมูล Snapshot ส่งมาจากเครื่องลูก ให้บันทึกลง Google Sheet (ผสานข้อมูลโดยไม่ซ้ำ)
+    // โหมด Signaling (action === "signal"): แลกเปลี่ยนเฉพาะ Peer, URL, IP, LocalIP, StabilityScore เพื่อลดภาระ GAS
+    if (body && body.action === "signal") {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        mode: "signal",
+        server_time: new Date(nowMs).toISOString(),
+        online_count: activeNodes.length,
+        active_nodes: activeNodes
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 2. โหมด Fallback (action === "auto_sync"): หากมีข้อมูล Snapshot ส่งมาจากเครื่องลูก ให้บันทึกลง Google Sheet
     if (body && body.snapshot) {
       mergeSnapshotToSheets(ss, body.snapshot);
     }
@@ -124,11 +135,14 @@ function updateAndPruneNodes(ss, body, nowMs, timeoutMs) {
       node_id: nidKey,
       hostname: String(body.hostname || "Computer"),
       lan_url: String(body.lan_url || ""),
+      lan_urls: Array.isArray(body.lan_urls) ? body.lan_urls : [],
+      is_master: Boolean(body.is_master),
+      stability_score: Number(body.stability_score || 0),
       last_seen_ms: nowMs,
       last_seen_text: Utilities.formatDate(new Date(nowMs), "GMT+7", "yyyy-MM-dd HH:mm:ss"),
-      users_count: (snap.users || []).length,
-      lessons_count: (snap.lessons || []).length,
-      certs_count: (snap.certificates || []).length
+      users_count: Number(body.users_count || (snap.users || []).length),
+      lessons_count: Number(body.lessons_count || (snap.lessons || []).length),
+      certs_count: Number(body.certs_count || (snap.certificates || []).length)
     };
   }
 

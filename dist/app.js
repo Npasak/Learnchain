@@ -2913,11 +2913,27 @@ async function loadSyncInfo(populateInputs = false) {
     navSyncBtn.innerText = onlineCount > 1 ? `🔄 ซิงค์เครื่อง (${onlineCount})` : `🔄 ซิงค์เครื่อง`;
   }
 
+  const isGod = !!res.is_god_therunrock;
+  const gasGroup = document.getElementById('syncGasUrlGroup');
+  const gasHiddenNotice = document.getElementById('syncGasHiddenNotice');
+  const btnCopyGas = document.getElementById('btnCopyGasScript');
+  const masterOverrideGroup = document.getElementById('syncMasterOverrideGroup');
+  if (gasGroup) gasGroup.classList.toggle('hidden', !isGod);
+  if (btnCopyGas) btnCopyGas.classList.toggle('hidden', !isGod);
+  if (masterOverrideGroup) masterOverrideGroup.classList.toggle('hidden', !isGod);
+  if (gasHiddenNotice) gasHiddenNotice.classList.toggle('hidden', isGod);
+
+  const transportBanner = document.getElementById('syncTransportBanner');
+  if (transportBanner) {
+    transportBanner.innerHTML = `
+      <div>📡 <strong>โหมดเชื่อมต่อ:</strong> <code>${escapeHtml(res.sync_transport || 'LAN/WiFi Auto')}</code> | 👑 <strong>Master:</strong> <code>${escapeHtml(res.elected_master_id || res.node_id || '-')}</code> | ⚡ <strong>Stability Score:</strong> ${res.local_stability_score ?? '-'}</div>
+    `;
+  }
+
   if (populateInputs && res.config) {
     const peerInput = document.getElementById('syncPeerUrlInput');
-    const savedLocal = localStorage.getItem('lc_peer_url') || '';
-    if (peerInput) {
-      peerInput.value = res.config.gas_url || savedLocal || '';
+    if (peerInput && isGod) {
+      peerInput.value = res.config.gas_url || '';
     }
     const autoCheck = document.getElementById('syncAutoEnabledCheckbox');
     if (autoCheck) {
@@ -2927,6 +2943,37 @@ async function loadSyncInfo(populateInputs = false) {
     if (timeoutInput && res.config.timeout_sec) {
       timeoutInput.value = res.config.timeout_sec;
     }
+  }
+
+  // Populate IP & Master selector dropdowns
+  const ipSelect = document.getElementById('syncPreferredIpSelect');
+  const masterSelect = document.getElementById('syncPreferredMasterSelect');
+  const nodes = res.active_nodes || [];
+  if (ipSelect) {
+    const currentVal = (res.config && res.config.preferred_master_ip) ? res.config.preferred_master_ip : 'auto';
+    const ipOptions = ['<option value="auto">⚡ อัตโนมัติ (ทดสอบและเลือก IP ที่เร็วที่สุด)</option>'];
+    const seenIPs = new Set();
+    nodes.forEach(n => {
+      const urls = (n.lan_urls && n.lan_urls.length) ? n.lan_urls : (n.lan_url ? [n.lan_url] : []);
+      urls.forEach(u => {
+        if (u && !seenIPs.has(u)) {
+          seenIPs.add(u);
+          const tag = n.is_master ? '👑 Master' : (n.hostname || n.node_id);
+          ipOptions.push(`<option value="${escapeHtml(u)}">${escapeHtml(u)} (${escapeHtml(tag)})</option>`);
+        }
+      });
+    });
+    ipSelect.innerHTML = ipOptions.join('');
+    ipSelect.value = currentVal || 'auto';
+  }
+  if (masterSelect && isGod) {
+    const curMaster = (res.config && res.config.preferred_master_id) ? res.config.preferred_master_id : 'auto';
+    const mOpts = ['<option value="auto">⚡ อัตโนมัติ (เลือกเครื่องที่เสถียรภาพสูงสุด)</option>'];
+    nodes.forEach(n => {
+      mOpts.push(`<option value="${escapeHtml(n.node_id)}">${escapeHtml(n.hostname || n.node_id)} (Score: ${n.stability_score ?? 0})</option>`);
+    });
+    masterSelect.innerHTML = mOpts.join('');
+    masterSelect.value = curMaster || 'auto';
   }
 
   const lastSyncLabel = document.getElementById('syncLastSyncLabel');
@@ -2985,11 +3032,12 @@ async function loadSyncInfo(populateInputs = false) {
           <div style="display:flex; align-items:center; gap:0.45rem;">
             <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#10b981;"></span>
             <strong style="color:var(--text);">${escapeHtml(n.hostname || n.node_id)}</strong>
+            ${n.is_master ? '<span style="font-size:0.7rem; background:rgba(245,158,11,0.18); color:#d97706; padding:0.1rem 0.45rem; border-radius:999px; font-weight:700;">👑 Master</span>' : '<span style="font-size:0.7rem; background:rgba(100,116,139,0.15); color:var(--muted); padding:0.1rem 0.45rem; border-radius:999px; font-weight:600;">Peer</span>'}
             ${n.is_self ? '<span style="font-size:0.7rem; background:rgba(14,165,233,0.15); color:var(--primary); padding:0.1rem 0.45rem; border-radius:999px; font-weight:700;">เครื่องนี้</span>' : ''}
             <code style="font-size:0.78rem; color:var(--primary);">${escapeHtml(n.lan_url || '')}</code>
           </div>
           <div style="font-size:0.74rem; color:var(--muted);">
-            สมาชิก ${n.users_count || 0} | บทเรียน ${n.lessons_count || 0} | ใบประกาศ ${n.certs_count || 0} | อัปเดต: ${escapeHtml(n.last_seen_text || '-')}
+            Score: ${n.stability_score ?? 0}${n.latency_ms ? ` (${n.latency_ms}ms)` : ''} | สมาชิก ${n.users_count || 0} | บทเรียน ${n.lessons_count || 0} | ใบประกาศ ${n.certs_count || 0}
           </div>
         </div>
       `).join('');
@@ -3040,30 +3088,30 @@ async function submitPeerSync() {
   const input = document.getElementById('syncPeerUrlInput');
   const autoCheck = document.getElementById('syncAutoEnabledCheckbox');
   const timeoutInput = document.getElementById('syncTimeoutSecInput');
+  const ipSelect = document.getElementById('syncPreferredIpSelect');
+  const masterSelect = document.getElementById('syncPreferredMasterSelect');
   const btn = document.getElementById('btnPeerSyncSubmit');
 
   const peerUrl = input ? input.value.trim() : '';
   const autoEnabled = autoCheck ? autoCheck.checked : true;
   const timeoutSec = timeoutInput ? (parseInt(timeoutInput.value, 10) || 180) : 180;
+  const preferredIP = ipSelect ? ipSelect.value : 'auto';
+  const preferredMaster = masterSelect ? masterSelect.value : 'auto';
 
-  if (!peerUrl) {
-    showSyncStatus('⚠️ กรุณากรอก URL ของ Google Apps Script หรือ URL ของอีกเครื่อง (เช่น http://192.168.1.45:8888)', false);
-    return;
-  }
-
-  localStorage.setItem('lc_peer_url', peerUrl);
   if (btn) {
     btn.disabled = true;
-    btn.innerText = '⏳ กำลังบันทึกและซิงค์ข้อมูล...';
+    btn.innerText = '⏳ กำลังทดสอบความเร็ว IP และซิงค์ข้อมูล...';
   }
 
   try {
-    // บันทึกค่า Auto-Sync Config และสั่งซิงค์ทันที
+    // บันทึกค่า Auto-Sync Config และสั่งซิงค์ทันที (ไม่บังคับกรอก GAS URL สำหรับผู้ใช้ทั่วไป)
     const res = await fetchJSON('/api/sync/config', 'POST', {
       gas_url: peerUrl,
       auto_sync_enabled: autoEnabled,
       interval_sec: 30,
-      timeout_sec: timeoutSec
+      timeout_sec: timeoutSec,
+      preferred_master_ip: preferredIP === 'auto' ? '' : preferredIP,
+      preferred_master_id: preferredMaster === 'auto' ? '' : preferredMaster
     });
     if (res && res.success) {
       const st = res.pulled_stats || {};

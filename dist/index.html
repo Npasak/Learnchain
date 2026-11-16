@@ -1342,22 +1342,45 @@
         <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.35rem;">
             <div style="font-size:0.9rem; font-weight:700; color:var(--text);">
-              ☁️ วิธีที่ 2: Auto-Sync ข้ามเครื่องผ่าน Google Apps Script & Google Sheet
+              ☁️ วิธีที่ 2: Auto-Sync อัจฉริยะ (LAN/WiFi หลัก + GAS Signaling/Fallback)
             </div>
-            <button type="button" class="btn btn-sm btn-wallet" onclick="copyGasScriptCode()" title="คัดลอกโค้ดสำหรับนำไปวางใน Google Sheet > Extensions > Apps Script">
+            <button type="button" id="btnCopyGasScript" class="btn btn-sm btn-wallet hidden" onclick="copyGasScriptCode()" title="คัดลอกโค้ดสำหรับนำไปวางใน Google Sheet > Extensions > Apps Script">
               📋 คัดลอกโค้ด Google Apps Script
             </button>
           </div>
-          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
-            ฝาก IP/URL ของแต่ละเครื่องและบันทึกข้อมูลลง <strong>Google Sheet</strong> เป็นฐานข้อมูลกลาง พร้อมตรวจสอบจำนวนเครื่องที่ออนไลน์ และลบเครื่องที่ไม่ได้ใช้งานเกินเวลาออกอัตโนมัติ:
+          <div id="syncTransportBanner" style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
+            ระบบจะใช้ <strong>LAN / WiFi / LocalIP</strong> ถ่ายโอนข้อมูลหลักโดยเลือก IP ที่เร็วที่สุดให้อัตโนมัติ และใช้ GAS เป็นช่องทางกลางระบุตำแหน่งเครื่องเท่านั้น (สลับใช้ GAS อัตโนมัติเมื่ออยู่นอกวง LAN)
           </div>
 
           <div style="display:flex; flex-direction:column; gap:0.55rem;">
-            <div>
+            <div id="syncGasUrlGroup" class="hidden">
               <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
-                🔗 URL ของ Google Apps Script Web App (หรือ URL เครื่องแม่ข่าย):
+                🔗 URL ของ Google Apps Script Signaling (เฉพาะ therunrock):
               </label>
-              <input type="text" id="syncPeerUrlInput" class="form-input" style="width:100%;" placeholder="เช่น https://script.google.com/macros/s/.../exec หรือ http://192.168.1.45:8888">
+              <input type="text" id="syncPeerUrlInput" class="form-input" style="width:100%;" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+
+            <div id="syncGasHiddenNotice" style="font-size:0.78rem; color:var(--muted); background:var(--bg); border:1px solid var(--border); padding:0.45rem 0.65rem; border-radius:8px;">
+              🔒 ช่องทาง GAS Signaling ถูกปกปิดไว้ (เฉพาะ <strong>therunrock</strong> ที่ดู/แก้ไขได้)
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr; gap:0.45rem;">
+              <div>
+                <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
+                  ⚡ การเลือก IP เชื่อมต่อ Master:
+                </label>
+                <select id="syncPreferredIpSelect" class="form-input" style="width:100%;">
+                  <option value="auto">⚡ อัตโนมัติ (ทดสอบและเลือก IP ที่เร็วที่สุด)</option>
+                </select>
+              </div>
+              <div id="syncMasterOverrideGroup" class="hidden">
+                <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
+                  👑 เลือก Master (เฉพาะ therunrock):
+                </label>
+                <select id="syncPreferredMasterSelect" class="form-input" style="width:100%;">
+                  <option value="auto">⚡ อัตโนมัติ (เลือกเครื่องที่เสถียรภาพและประสิทธิภาพสูงสุด)</option>
+                </select>
+              </div>
             </div>
 
             <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; margin-top:0.15rem;">

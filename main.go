@@ -176,6 +176,7 @@ func main() {
 
 	// Multi-Machine Sync & Network Sharing
 	syncGroup := api.Group("/sync")
+	syncGroup.Get("/ping", syncHandler.Ping)
 	syncGroup.Get("/info", syncHandler.GetSyncInfo)
 	syncGroup.Get("/qr", syncHandler.GetQRCodeSVG)
 	syncGroup.Post("/config", syncHandler.UpdateSyncConfig)

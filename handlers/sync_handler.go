@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -24,53 +26,116 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// DefaultGASSignalingURL is the built-in lightweight signaling hub for peer/IP discovery and fallback.
+const DefaultGASSignalingURL = "https://script.google.com/macros/s/AKfycbwtsvCyQlQfJ_NMcmwKqpywNX2iJMvNqVcUOX3rhBwD7Nfyu-F_M4dKk_zglcHjT4onJg/exec"
+
 // ActiveNodeInfo represents a connected machine in the sync network
 type ActiveNodeInfo struct {
-	NodeID       string `json:"node_id"`
-	Hostname     string `json:"hostname"`
-	LanURL       string `json:"lan_url"`
-	LastSeenMs   int64  `json:"last_seen_ms"`
-	LastSeenText string `json:"last_seen_text"`
-	UsersCount   int    `json:"users_count"`
-	LessonsCount int    `json:"lessons_count"`
-	CertsCount   int    `json:"certs_count"`
-	IsSelf       bool   `json:"is_self,omitempty"`
+	NodeID         string   `json:"node_id"`
+	Hostname       string   `json:"hostname"`
+	LanURL         string   `json:"lan_url"`
+	LanURLs        []string `json:"lan_urls,omitempty"`
+	LastSeenMs     int64    `json:"last_seen_ms"`
+	LastSeenText   string   `json:"last_seen_text"`
+	UsersCount     int      `json:"users_count"`
+	LessonsCount   int      `json:"lessons_count"`
+	CertsCount     int      `json:"certs_count"`
+	IsSelf         bool     `json:"is_self,omitempty"`
+	IsMaster       bool     `json:"is_master"`
+	StabilityScore float64  `json:"stability_score"`
+	ComputeScore   float64  `json:"compute_score,omitempty"`
+	LatencyMs      int64    `json:"latency_ms,omitempty"`
 }
 
 // SyncConfig stores persistent Auto-Sync settings for this machine
 type SyncConfig struct {
-	GasURL          string           `json:"gas_url"`
-	AutoSyncEnabled bool             `json:"auto_sync_enabled"`
-	IntervalSec     int              `json:"interval_sec"`
-	TimeoutSec      int              `json:"timeout_sec"`
-	KnownPeers      []ActiveNodeInfo `json:"known_peers,omitempty"`
+	GasURL            string           `json:"gas_url"`
+	AutoSyncEnabled   bool             `json:"auto_sync_enabled"`
+	IntervalSec       int              `json:"interval_sec"`
+	TimeoutSec        int              `json:"timeout_sec"`
+	PreferredMasterIP string           `json:"preferred_master_ip,omitempty"` // "" = auto fastest IP
+	PreferredMasterID string           `json:"preferred_master_id,omitempty"` // therunrock override
+	KnownPeers        []ActiveNodeInfo `json:"known_peers,omitempty"`
 }
 
 type SyncHandler struct {
-	mu             sync.Mutex
-	cfg            SyncConfig
-	lastSyncAt     string
-	lastSyncStatus string
-	activeNodes    map[string]ActiveNodeInfo
+	mu               sync.Mutex
+	cfg              SyncConfig
+	lastSyncAt       string
+	lastSyncStatus   string
+	syncTransport    string
+	activeNodes      map[string]ActiveNodeInfo
+	startedAt        time.Time
+	computeScore     float64
+	syncSuccessCount int64
+	syncFailCount    int64
+	isSelfMaster     bool
+	electedMasterID  string
+	electedMasterIP  string
 }
 
 var GlobalSyncHandler *SyncHandler
 
 func NewSyncHandler() *SyncHandler {
+	defaultGAS := os.Getenv("GAS_SYNC_URL")
+	if strings.TrimSpace(defaultGAS) == "" {
+		defaultGAS = DefaultGASSignalingURL
+	}
 	h := &SyncHandler{
 		cfg: SyncConfig{
-			GasURL:          os.Getenv("GAS_SYNC_URL"),
-			AutoSyncEnabled: os.Getenv("GAS_SYNC_URL") != "",
+			GasURL:          defaultGAS,
+			AutoSyncEnabled: true,
 			IntervalSec:     30,
 			TimeoutSec:      180, // 3 minutes default timeout before inactive machine is removed
 		},
-		activeNodes: make(map[string]ActiveNodeInfo),
+		activeNodes:   make(map[string]ActiveNodeInfo),
+		startedAt:     time.Now(),
+		computeScore:  measureComputeScore(),
+		syncTransport: "LAN/WiFi Auto",
 	}
 	h.loadConfigFromFile()
+	if strings.TrimSpace(h.cfg.GasURL) == "" {
+		h.cfg.GasURL = DefaultGASSignalingURL
+		h.cfg.AutoSyncEnabled = true
+	}
 	h.touchSelfNode()
 	GlobalSyncHandler = h
 	h.StartAutoSyncWorker()
 	return h
+}
+
+// measureComputeScore runs a fast ~15ms SHA-256 + math benchmark to score node calculation speed (0..40).
+func measureComputeScore() float64 {
+	start := time.Now()
+	buf := []byte("learnchain-stability-benchmark")
+	var ops int
+	for time.Since(start) < 15*time.Millisecond {
+		sum := sha256.Sum256(buf)
+		buf[0] ^= sum[0]
+		ops++
+	}
+	elapsedSec := time.Since(start).Seconds()
+	if elapsedSec <= 0 {
+		elapsedSec = 0.015
+	}
+	opsPerMs := float64(ops) / (elapsedSec * 1000.0)
+	// Normalize smoothly to 0..40 points
+	score := math.Min(40.0, opsPerMs/50.0)
+	return math.Round(score*10) / 10
+}
+
+// selfStabilityScoreLocked computes overall system stability & performance (0..100).
+// Combines calculation speed (40%), network reliability (40%), and uptime stability (20%).
+func (h *SyncHandler) selfStabilityScoreLocked() float64 {
+	total := h.syncSuccessCount + h.syncFailCount
+	reliability := 40.0
+	if total > 0 {
+		reliability = 40.0 * (float64(h.syncSuccessCount) / float64(total))
+	}
+	uptimeMin := time.Since(h.startedAt).Minutes()
+	uptimeBonus := math.Min(20.0, uptimeMin*2.0)
+	totalScore := h.computeScore + reliability + uptimeBonus
+	return math.Round(totalScore*10) / 10
 }
 
 func (h *SyncHandler) configFilePath() string {
@@ -133,7 +198,7 @@ func getMachineIdentity() (nodeID, hostname, primaryLanURL string, lanURLs []str
 }
 
 func (h *SyncHandler) touchSelfNode() ActiveNodeInfo {
-	nodeID, hostname, primaryLanURL, _ := getMachineIdentity()
+	nodeID, hostname, primaryLanURL, lanURLs := getMachineIdentity()
 	var uCount, lCount, cCount int64
 	if database.DB != nil {
 		database.DB.Model(&models.User{}).Count(&uCount)
@@ -141,16 +206,25 @@ func (h *SyncHandler) touchSelfNode() ActiveNodeInfo {
 		database.DB.Model(&models.Certificate{}).Count(&cCount)
 	}
 	now := time.Now()
+	if h.electedMasterID == "" {
+		h.electedMasterID = nodeID
+		h.isSelfMaster = true
+		h.electedMasterIP = primaryLanURL
+	}
 	selfNode := ActiveNodeInfo{
-		NodeID:       nodeID,
-		Hostname:     hostname,
-		LanURL:       primaryLanURL,
-		LastSeenMs:   now.UnixMilli(),
-		LastSeenText: now.Format("2006-01-02 15:04:05"),
-		UsersCount:   int(uCount),
-		LessonsCount: int(lCount),
-		CertsCount:   int(cCount),
-		IsSelf:       true,
+		NodeID:         nodeID,
+		Hostname:       hostname,
+		LanURL:         primaryLanURL,
+		LanURLs:        lanURLs,
+		LastSeenMs:     now.UnixMilli(),
+		LastSeenText:   now.Format("2006-01-02 15:04:05"),
+		UsersCount:     int(uCount),
+		LessonsCount:   int(lCount),
+		CertsCount:     int(cCount),
+		IsSelf:         true,
+		IsMaster:       h.isSelfMaster,
+		StabilityScore: h.selfStabilityScoreLocked(),
+		ComputeScore:   h.computeScore,
 	}
 	h.activeNodes[nodeID] = selfNode
 	return selfNode
@@ -312,8 +386,27 @@ func GetLocalIPs() []string {
 	return ips
 }
 
+// Ping returns lightweight node status & stability score for fastest-IP benchmarking.
+func (h *SyncHandler) Ping(c *fiber.Ctx) error {
+	nodeID, hostname, primaryLanURL, _ := getMachineIdentity()
+	h.mu.Lock()
+	score := h.selfStabilityScoreLocked()
+	isMaster := h.isSelfMaster
+	h.mu.Unlock()
+	return c.JSON(fiber.Map{
+		"ok":              true,
+		"node_id":         nodeID,
+		"hostname":        hostname,
+		"lan_url":         primaryLanURL,
+		"stability_score": score,
+		"is_master":       isMaster,
+		"server_time_ms":  time.Now().UnixMilli(),
+	})
+}
+
 // GetSyncInfo returns network URLs, QR info, Auto-Sync config, active machines, and record counts
 func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
+	isGod := requireGodTherunrock(c)
 	nodeID, hostname, primaryLanURL, lanURLs := getMachineIdentity()
 	port := "8888"
 	if config.AppConfig != nil && config.AppConfig.Port != "" {
@@ -331,22 +424,35 @@ func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 	h.touchSelfNode()
 	nodes := h.pruneExpiredNodesLocked()
 	cfgCopy := h.cfg
+	if !isGod {
+		cfgCopy.GasURL = ""
+	}
 	lastSyncAt := h.lastSyncAt
 	lastSyncStatus := h.lastSyncStatus
+	syncTransport := h.syncTransport
+	masterID := h.electedMasterID
+	masterIP := h.electedMasterIP
+	localScore := h.selfStabilityScoreLocked()
 	h.mu.Unlock()
 
 	return c.JSON(fiber.Map{
-		"success":          true,
-		"node_id":          nodeID,
-		"hostname":         hostname,
-		"port":             port,
-		"primary_lan_url":  primaryLanURL,
-		"lan_ips":          GetLocalIPs(),
-		"lan_urls":         lanURLs,
-		"user_count":       userCount,
-		"lesson_count":     lessonCount,
-		"progress_count":   progressCount,
-		"cert_count":       certCount,
+		"success":               true,
+		"is_god_therunrock":     isGod,
+		"gas_url_hidden":        !isGod,
+		"node_id":               nodeID,
+		"hostname":              hostname,
+		"port":                  port,
+		"primary_lan_url":       primaryLanURL,
+		"lan_ips":               GetLocalIPs(),
+		"lan_urls":              lanURLs,
+		"elected_master_id":     masterID,
+		"elected_master_ip":     masterIP,
+		"sync_transport":        syncTransport,
+		"local_stability_score": localScore,
+		"user_count":            userCount,
+		"lesson_count":          lessonCount,
+		"progress_count":        progressCount,
+		"cert_count":            certCount,
 		"counts": fiber.Map{
 			"users":        userCount,
 			"lessons":      lessonCount,
@@ -362,8 +468,9 @@ func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 	})
 }
 
-// UpdateSyncConfig saves Google Apps Script URL and Auto-Sync settings, then runs an immediate sync
+// UpdateSyncConfig saves Auto-Sync settings (GAS URL & Master override restricted to therunrock)
 func (h *SyncHandler) UpdateSyncConfig(c *fiber.Ctx) error {
+	isGod := requireGodTherunrock(c)
 	var req SyncConfig
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -379,20 +486,30 @@ func (h *SyncHandler) UpdateSyncConfig(c *fiber.Ctx) error {
 	}
 
 	h.mu.Lock()
-	h.cfg.GasURL = strings.TrimSpace(req.GasURL)
+	if isGod {
+		if trimmed := strings.TrimSpace(req.GasURL); trimmed != "" {
+			h.cfg.GasURL = trimmed
+		}
+		h.cfg.PreferredMasterID = strings.TrimSpace(req.PreferredMasterID)
+	}
+	h.cfg.PreferredMasterIP = strings.TrimSpace(req.PreferredMasterIP)
 	h.cfg.AutoSyncEnabled = req.AutoSyncEnabled
 	h.cfg.IntervalSec = req.IntervalSec
 	h.cfg.TimeoutSec = req.TimeoutSec
 	h.saveConfigToFile()
+	cfgCopy := h.cfg
+	if !isGod {
+		cfgCopy.GasURL = ""
+	}
 	h.mu.Unlock()
 
-	if h.cfg.AutoSyncEnabled && h.cfg.GasURL != "" {
+	if h.cfg.AutoSyncEnabled {
 		resMap, err := h.ExecuteCloudAndPeerAutoSync()
 		if err != nil {
 			return c.JSON(fiber.Map{
 				"success": false,
 				"error":   err.Error(),
-				"config":  h.cfg,
+				"config":  cfgCopy,
 			})
 		}
 		return c.JSON(resMap)
@@ -401,35 +518,44 @@ func (h *SyncHandler) UpdateSyncConfig(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "บันทึกการตั้งค่า Auto-Sync เรียบร้อยแล้ว",
-		"config":  h.cfg,
+		"config":  cfgCopy,
 	})
 }
 
-// TriggerAutoSyncNow forces an immediate sync cycle with the configured Google Apps Script / Hub URL
+// TriggerAutoSyncNow forces an immediate sync cycle using LAN/WiFi primary or GAS fallback
 func (h *SyncHandler) TriggerAutoSyncNow(c *fiber.Ctx) error {
+	isGod := requireGodTherunrock(c)
 	var body struct {
-		GasURL     string `json:"gas_url"`
-		TimeoutSec int    `json:"timeout_sec"`
+		GasURL            string `json:"gas_url"`
+		TimeoutSec        int    `json:"timeout_sec"`
+		PreferredMasterIP string `json:"preferred_master_ip"`
+		PreferredMasterID string `json:"preferred_master_id"`
 	}
 	_ = c.BodyParser(&body)
 
 	h.mu.Lock()
-	if strings.TrimSpace(body.GasURL) != "" {
+	if isGod && strings.TrimSpace(body.GasURL) != "" {
 		h.cfg.GasURL = strings.TrimSpace(body.GasURL)
+	}
+	if isGod && body.PreferredMasterID != "" {
+		if body.PreferredMasterID == "auto" {
+			h.cfg.PreferredMasterID = ""
+		} else {
+			h.cfg.PreferredMasterID = strings.TrimSpace(body.PreferredMasterID)
+		}
+	}
+	if body.PreferredMasterIP != "" {
+		if body.PreferredMasterIP == "auto" {
+			h.cfg.PreferredMasterIP = ""
+		} else {
+			h.cfg.PreferredMasterIP = strings.TrimSpace(body.PreferredMasterIP)
+		}
 	}
 	if body.TimeoutSec >= 1 {
 		h.cfg.TimeoutSec = body.TimeoutSec
 	}
 	h.saveConfigToFile()
-	gasURL := h.cfg.GasURL
 	h.mu.Unlock()
-
-	if gasURL == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"error":   "กรุณาระบุ URL ของ Google Apps Script (หรือ URL เครื่องแม่ข่าย) ก่อนกดซิงค์",
-		})
-	}
 
 	resMap, err := h.ExecuteCloudAndPeerAutoSync()
 	if err != nil {
@@ -441,103 +567,171 @@ func (h *SyncHandler) TriggerAutoSyncNow(c *fiber.Ctx) error {
 	return c.JSON(resMap)
 }
 
-// ExecuteCloudAndPeerAutoSync sends heartbeat + local snapshot to Google Apps Script (or Hub),
-// receives merged cloud data + list of active machines, and syncs with active peers.
+// ExecuteCloudAndPeerAutoSync follows the hybrid signaling & direct-LAN rules:
+// 1. Use GAS only as lightweight signaling (Peer, URL, IP, LocalIP, StabilityScore) when LAN/WiFi peers are reachable.
+// 2. Elect exactly 1 Master based on overall stability & performance score (or therunrock override) and auto-pick the fastest IP.
+// 3. Transfer main snapshot directly via LAN/WiFi/LocalIP; automatically fall back to GAS full-sync ONLY if no LAN/WiFi peer is reachable.
 func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	h.mu.Lock()
 	targetURL := strings.TrimSpace(h.cfg.GasURL)
 	timeoutSec := h.cfg.TimeoutSec
+	preferredIP := strings.TrimSpace(h.cfg.PreferredMasterIP)
+	preferredMasterID := strings.TrimSpace(h.cfg.PreferredMasterID)
+	selfScore := h.selfStabilityScoreLocked()
+	isSelfMaster := h.isSelfMaster
 	h.mu.Unlock()
 
-	if targetURL == "" {
-		return nil, fmt.Errorf("ยังไม่ได้ตั้งค่า Google Apps Script URL")
-	}
-
-	// Normalize URL: if user entered a bare IP/host (e.g. http://192.168.1.50:8888), route to /api/sync/gas-hub
-	endpointURL := targetURL
-	if !strings.Contains(endpointURL, "script.google.com") && !strings.Contains(endpointURL, "/api/sync/") {
-		if !strings.HasPrefix(endpointURL, "http://") && !strings.HasPrefix(endpointURL, "https://") {
-			endpointURL = "http://" + endpointURL
-		}
-		endpointURL = strings.TrimRight(endpointURL, "/") + "/api/sync/gas-hub"
-	}
-
-	nodeID, hostname, primaryLanURL, _ := getMachineIdentity()
+	nodeID, hostname, primaryLanURL, lanURLs := getMachineIdentity()
 	localSnap := BuildSnapshot()
 
+	// Step A: Lightweight GAS Signaling (discover peers/IPs/scores without sending heavy snapshot)
+	isGASSignaling := strings.Contains(targetURL, "script.google.com")
+	if isGASSignaling && targetURL != "" {
+		signalNodes, sigErr := h.sendGASSignal(targetURL, nodeID, hostname, primaryLanURL, lanURLs, timeoutSec, isSelfMaster, selfScore, localSnap)
+		if sigErr == nil && len(signalNodes) > 0 {
+			h.mu.Lock()
+			for _, n := range signalNodes {
+				if n.NodeID != "" && n.NodeID != nodeID {
+					n.IsSelf = false
+					h.activeNodes[n.NodeID] = n
+				}
+			}
+			h.mu.Unlock()
+		}
+	}
+
+	// Step B: Elect 1 single Master based on overall stability/performance score (resolves multi-Master conflicts)
+	h.mu.Lock()
+	h.touchSelfNode()
+	allNodes := h.pruneExpiredNodesLocked()
+	electedMaster := h.electSingleMasterLocked(allNodes, preferredMasterID)
+	h.mu.Unlock()
+
+	var hubResp hubSyncResponse
+	var usedTransport string
+	var chosenMasterIP string
+	var chosenMasterLatency int64
+
+	// Step C: Direct LAN/WiFi/LocalIP transfer first (benchmarking fastest IP or using user's manual IP)
 	payload := fiber.Map{
-		"action":      "auto_sync",
-		"node_id":     nodeID,
-		"hostname":    hostname,
-		"lan_url":     primaryLanURL,
-		"timeout_sec": timeoutSec,
-		"snapshot":    localSnap,
+		"action":          "auto_sync",
+		"node_id":         nodeID,
+		"hostname":        hostname,
+		"lan_url":         primaryLanURL,
+		"lan_urls":        lanURLs,
+		"is_master":       h.isSelfMaster,
+		"stability_score": selfScore,
+		"timeout_sec":     timeoutSec,
+		"snapshot":        localSnap,
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Post(endpointURL, "application/json", bytes.NewReader(payloadBytes))
-	var hubResp hubSyncResponse
-	var failoverPeer *ActiveNodeInfo
-
-	if err != nil {
-		// Primary Master / Hub unreachable -> attempt deterministic LAN Failover to another active peer
-		fbResp, fbPeer, fbErr := h.tryFailoverSync(payloadBytes, endpointURL, nodeID, primaryLanURL)
-		if fbErr != nil {
-			h.mu.Lock()
-			h.lastSyncAt = time.Now().Format("15:04:05")
-			h.lastSyncStatus = "❌ เชื่อมต่อ Master และ Failover Peer ไม่สำเร็จ: " + err.Error()
-			h.mu.Unlock()
-			return nil, fmt.Errorf("ไม่สามารถเชื่อมต่อกับ URL (%s) และไม่พบ Peer สำรอง: %v", targetURL, err)
-		}
-		hubResp = *fbResp
-		failoverPeer = fbPeer
-	} else {
-		defer resp.Body.Close()
-		respBytes, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, fmt.Errorf("อ่านข้อมูลตอบกลับไม่สำเร็จ: %v", readErr)
-		}
-		if err := json.Unmarshal(respBytes, &hubResp); err != nil || !hubResp.Success {
-			errMsg := hubResp.Error
-			if errMsg == "" {
-				errMsg = "รูปแบบข้อมูลตอบกลับจาก Google Apps Script ไม่ถูกต้อง"
+	// Collect candidate direct LAN targets: elected Master's URLs first, then any other peer
+	var directSuccess bool
+	if electedMaster != nil && electedMaster.NodeID != nodeID {
+		candURLs := collectNodeURLs(*electedMaster)
+		bestURL, latMs, ok := h.selectBestNodeURL(candURLs, preferredIP)
+		if ok {
+			if respData, err := postSyncPayload(strings.TrimRight(bestURL, "/")+"/api/sync/gas-hub", payloadBytes, 12*time.Second); err == nil {
+				hubResp = *respData
+				directSuccess = true
+				usedTransport = fmt.Sprintf("LAN/WiFi Direct (%s • %dms)", bestURL, latMs)
+				chosenMasterIP = bestURL
+				chosenMasterLatency = latMs
 			}
-			h.mu.Lock()
-			h.lastSyncAt = time.Now().Format("15:04:05")
-			h.lastSyncStatus = "❌ " + errMsg
-			h.mu.Unlock()
-			return nil, fmt.Errorf("%s", errMsg)
 		}
 	}
 
-	// Merge cloud/hub snapshot into local DB
+	// If elected Master wasn't reachable directly (or self was Master), try any other reachable LAN peer
+	if !directSuccess {
+		fbResp, fbPeer, fbURL, fbLat, fbErr := h.tryFastestLANPeerSync(payloadBytes, nodeID, primaryLanURL, preferredIP)
+		if fbErr == nil {
+			hubResp = *fbResp
+			directSuccess = true
+			usedTransport = fmt.Sprintf("LAN/WiFi Direct (%s • %dms)", fbURL, fbLat)
+			chosenMasterIP = fbURL
+			chosenMasterLatency = fbLat
+			if fbPeer != nil {
+				h.mu.Lock()
+				h.electedMasterID = fbPeer.NodeID
+				h.electedMasterIP = fbURL
+				h.mu.Unlock()
+			}
+		}
+	}
+
+	// Step D: Automatic GAS Fallback ONLY if direct LAN/WiFi/IP transfer failed or no LAN peers exist
+	if !directSuccess {
+		if targetURL == "" {
+			h.mu.Lock()
+			h.syncFailCount++
+			h.lastSyncAt = time.Now().Format("15:04:05")
+			h.lastSyncStatus = "❌ ไม่พบเครื่องอื่นในวง LAN และยังไม่ได้ตั้งค่า GAS"
+			h.syncTransport = "Offline"
+			h.mu.Unlock()
+			return nil, fmt.Errorf("ไม่พบเครื่องอื่นในวง LAN/WiFi และยังไม่ได้ตั้งค่า URL สำรอง")
+		}
+
+		endpointURL := targetURL
+		if !isGASSignaling && !strings.Contains(endpointURL, "/api/sync/") {
+			if !strings.HasPrefix(endpointURL, "http://") && !strings.HasPrefix(endpointURL, "https://") {
+				endpointURL = "http://" + endpointURL
+			}
+			endpointURL = strings.TrimRight(endpointURL, "/") + "/api/sync/gas-hub"
+		}
+
+		respData, err := postSyncPayload(endpointURL, payloadBytes, 20*time.Second)
+		if err != nil {
+			h.mu.Lock()
+			h.syncFailCount++
+			h.lastSyncAt = time.Now().Format("15:04:05")
+			h.lastSyncStatus = "❌ เชื่อมต่อ LAN และ GAS Fallback ไม่สำเร็จ: " + err.Error()
+			h.syncTransport = "Offline"
+			h.mu.Unlock()
+			return nil, fmt.Errorf("เชื่อมต่อ LAN และ GAS Fallback ไม่สำเร็จ: %v", err)
+		}
+		hubResp = *respData
+		if isGASSignaling {
+			usedTransport = "GAS Fallback (อัตโนมัติ)"
+		} else {
+			usedTransport = "Direct Hub (" + endpointURL + ")"
+		}
+	}
+
+	// Merge snapshot into local DB
 	var mergedStats fiber.Map
 	if hubResp.Snapshot != nil {
 		mergedStats = MergeSnapshot(hubResp.Snapshot)
 	}
 
-	// Update active nodes registry from cloud/hub response
+	// Update active nodes, re-elect single Master, and persist known peers
 	h.mu.Lock()
+	h.syncSuccessCount++
 	h.activeNodes = make(map[string]ActiveNodeInfo)
 	for _, n := range hubResp.ActiveNodes {
 		n.IsSelf = (n.NodeID == nodeID)
+		if n.NodeID == chosenMasterIP || (electedMaster != nil && n.NodeID == electedMaster.NodeID && chosenMasterLatency > 0) {
+			n.LatencyMs = chosenMasterLatency
+		}
 		h.activeNodes[n.NodeID] = n
 	}
 	h.touchSelfNode()
 	activeList := h.pruneExpiredNodesLocked()
-	h.updateKnownPeersLocked(activeList)
-	h.lastSyncAt = time.Now().Format("15:04:05")
-	if failoverPeer != nil {
-		h.lastSyncStatus = fmt.Sprintf("🔄 Failover: ซิงค์ผ่าน %s (%s) แทน Master (ออนไลน์ %d เครื่อง)", failoverPeer.Hostname, failoverPeer.LanURL, len(activeList))
-	} else {
-		h.lastSyncStatus = fmt.Sprintf("✅ ซิงค์สำเร็จ (ออนไลน์ %d เครื่อง)", len(activeList))
+	finalMaster := h.electSingleMasterLocked(activeList, preferredMasterID)
+	if chosenMasterIP != "" {
+		h.electedMasterIP = chosenMasterIP
+	} else if finalMaster != nil {
+		h.electedMasterIP = finalMaster.LanURL
 	}
+	h.updateKnownPeersLocked(activeList)
+	h.syncTransport = usedTransport
+	h.lastSyncAt = time.Now().Format("15:04:05")
+	h.lastSyncStatus = fmt.Sprintf("✅ %s (ออนไลน์ %d เครื่อง)", usedTransport, len(activeList))
 	h.mu.Unlock()
 
-	// Also push/pull directly with any other active LAN peers discovered in ActiveNodes
+	// Broadcast snapshot directly to other active LAN peers
 	for _, peer := range activeList {
-		if !peer.IsSelf && peer.LanURL != "" && peer.LanURL != primaryLanURL {
+		if !peer.IsSelf && peer.LanURL != "" && peer.LanURL != primaryLanURL && peer.LanURL != chosenMasterIP {
 			go func(peerLanURL string) {
 				pClient := &http.Client{Timeout: 4 * time.Second}
 				snap := BuildSnapshot()
@@ -550,7 +744,7 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 		}
 	}
 
-	log.Printf("🔄 [Auto-Sync] ซิงค์ข้อมูลสำเร็จ | เครื่องที่เชื่อมต่ออยู่: %d เครื่อง", len(activeList))
+	log.Printf("🔄 [Auto-Sync] %s | ออนไลน์ %d เครื่อง", usedTransport, len(activeList))
 
 	return fiber.Map{
 		"success":          true,
@@ -583,9 +777,184 @@ func (h *SyncHandler) updateKnownPeersLocked(activeList []ActiveNodeInfo) {
 	h.saveConfigToFile()
 }
 
-// tryFailoverSync deterministically selects an online LAN peer to act as temporary Master/Hub
-// when the configured primary Master or Hub URL is unreachable.
-func (h *SyncHandler) tryFailoverSync(payloadBytes []byte, primaryEndpoint, selfNodeID, selfLanURL string) (*hubSyncResponse, *ActiveNodeInfo, error) {
+// sendGASSignal sends lightweight peer/IP/score metadata ONLY to GAS (no heavy snapshot)
+// to reduce load on GAS while discovering peers and IPs across networks.
+func (h *SyncHandler) sendGASSignal(gasURL, nodeID, hostname, primaryLanURL string, lanURLs []string, timeoutSec int, isMaster bool, stabilityScore float64, localSnap SyncSnapshot) ([]ActiveNodeInfo, error) {
+	sigPayload := fiber.Map{
+		"action":          "signal",
+		"node_id":         nodeID,
+		"hostname":        hostname,
+		"lan_url":         primaryLanURL,
+		"lan_urls":        lanURLs,
+		"is_master":       isMaster,
+		"stability_score": stabilityScore,
+		"timeout_sec":     timeoutSec,
+		"users_count":     len(localSnap.Users),
+		"lessons_count":   len(localSnap.Lessons),
+		"certs_count":     len(localSnap.Certificates),
+	}
+	b, _ := json.Marshal(sigPayload)
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Post(gasURL, "application/json", bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var parsed hubSyncResponse
+	if err := json.Unmarshal(respBytes, &parsed); err != nil || !parsed.Success {
+		return nil, fmt.Errorf("invalid GAS signal response")
+	}
+	return parsed.ActiveNodes, nil
+}
+
+func postSyncPayload(endpoint string, payloadBytes []byte, timeout time.Duration) (*hubSyncResponse, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payloadBytes))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("อ่านข้อมูลตอบกลับไม่สำเร็จ: %v", err)
+	}
+	var parsed hubSyncResponse
+	if err := json.Unmarshal(respBytes, &parsed); err != nil || !parsed.Success {
+		errMsg := parsed.Error
+		if errMsg == "" {
+			errMsg = "รูปแบบข้อมูลตอบกลับไม่ถูกต้อง"
+		}
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+	return &parsed, nil
+}
+
+func collectNodeURLs(n ActiveNodeInfo) []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(u string) {
+		u = strings.TrimRight(strings.TrimSpace(u), "/")
+		if u != "" && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	add(n.LanURL)
+	for _, u := range n.LanURLs {
+		add(u)
+	}
+	return out
+}
+
+// selectBestNodeURL probes all candidate IPs concurrently and picks the fastest reachable IP
+// (or honors preferredIP if manually selected by the user and reachable).
+func (h *SyncHandler) selectBestNodeURL(urls []string, preferredIP string) (string, int64, bool) {
+	if len(urls) == 0 {
+		return "", 0, false
+	}
+	type probeRes struct {
+		url string
+		ms  int64
+		ok  bool
+	}
+	ch := make(chan probeRes, len(urls))
+	for _, u := range urls {
+		go func(target string) {
+			client := &http.Client{Timeout: 1800 * time.Millisecond}
+			start := time.Now()
+			resp, err := client.Get(strings.TrimRight(target, "/") + "/api/sync/ping")
+			if err != nil {
+				ch <- probeRes{url: target, ok: false}
+				return
+			}
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				ch <- probeRes{url: target, ms: time.Since(start).Milliseconds(), ok: true}
+			} else {
+				ch <- probeRes{url: target, ok: false}
+			}
+		}(u)
+	}
+
+	var reachable []probeRes
+	for i := 0; i < len(urls); i++ {
+		r := <-ch
+		if r.ok {
+			reachable = append(reachable, r)
+		}
+	}
+	if len(reachable) == 0 {
+		return "", 0, false
+	}
+
+	// If user manually selected a specific IP and it is reachable, honor it
+	if preferredIP != "" {
+		normPref := strings.TrimRight(preferredIP, "/")
+		for _, r := range reachable {
+			if strings.EqualFold(r.url, normPref) || strings.Contains(r.url, normPref) {
+				return r.url, r.ms, true
+			}
+		}
+	}
+
+	// Otherwise auto-pick the fastest (lowest latency) IP
+	sort.Slice(reachable, func(i, j int) bool {
+		return reachable[i].ms < reachable[j].ms
+	})
+	return reachable[0].url, reachable[0].ms, true
+}
+
+// electSingleMasterLocked resolves multi-Master conflicts by electing exactly 1 Master
+// based on overall stability & performance score (or therunrock manual override).
+func (h *SyncHandler) electSingleMasterLocked(nodes []ActiveNodeInfo, preferredMasterID string) *ActiveNodeInfo {
+	if len(nodes) == 0 {
+		return nil
+	}
+	selfID, _, _, _ := getMachineIdentity()
+
+	if preferredMasterID != "" {
+		for i := range nodes {
+			if nodes[i].NodeID == preferredMasterID {
+				nodes[i].IsMaster = true
+				h.electedMasterID = nodes[i].NodeID
+				h.isSelfMaster = (nodes[i].NodeID == selfID)
+				return &nodes[i]
+			}
+		}
+	}
+
+	// Sort all online nodes by StabilityScore DESC, then LatencyMs ASC, then NodeID ASC (deterministic)
+	sorted := make([]ActiveNodeInfo, len(nodes))
+	copy(sorted, nodes)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].StabilityScore != sorted[j].StabilityScore {
+			return sorted[i].StabilityScore > sorted[j].StabilityScore
+		}
+		if sorted[i].LatencyMs != sorted[j].LatencyMs && sorted[i].LatencyMs > 0 && sorted[j].LatencyMs > 0 {
+			return sorted[i].LatencyMs < sorted[j].LatencyMs
+		}
+		return sorted[i].NodeID < sorted[j].NodeID
+	})
+
+	winner := sorted[0]
+	h.electedMasterID = winner.NodeID
+	h.isSelfMaster = (winner.NodeID == selfID)
+	for i := range nodes {
+		nodes[i].IsMaster = (nodes[i].NodeID == winner.NodeID)
+		if existing, ok := h.activeNodes[nodes[i].NodeID]; ok {
+			existing.IsMaster = nodes[i].IsMaster
+			h.activeNodes[nodes[i].NodeID] = existing
+		}
+	}
+	return &winner
+}
+
+// tryFastestLANPeerSync finds any reachable LAN/WiFi peer, picks its fastest IP, and syncs directly.
+func (h *SyncHandler) tryFastestLANPeerSync(payloadBytes []byte, selfNodeID, selfLanURL, preferredIP string) (*hubSyncResponse, *ActiveNodeInfo, string, int64, error) {
 	h.mu.Lock()
 	seen := make(map[string]ActiveNodeInfo)
 	for _, n := range h.activeNodes {
@@ -603,47 +972,35 @@ func (h *SyncHandler) tryFailoverSync(payloadBytes []byte, primaryEndpoint, self
 	h.mu.Unlock()
 
 	if len(seen) == 0 {
-		return nil, nil, fmt.Errorf("no known failover peers")
+		return nil, nil, "", 0, fmt.Errorf("no known LAN peers")
 	}
 
 	var candidates []ActiveNodeInfo
 	for _, n := range seen {
-		candEndpoint := strings.TrimRight(n.LanURL, "/") + "/api/sync/gas-hub"
-		if strings.EqualFold(candEndpoint, primaryEndpoint) {
-			continue
-		}
 		candidates = append(candidates, n)
 	}
-	if len(candidates) == 0 {
-		return nil, nil, fmt.Errorf("no reachable failover candidates")
-	}
-
-	// Sort deterministically by NodeID so all remaining peers elect the same failover leader
+	// Prefer highest stability score, then deterministic NodeID
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].StabilityScore != candidates[j].StabilityScore {
+			return candidates[i].StabilityScore > candidates[j].StabilityScore
+		}
 		return candidates[i].NodeID < candidates[j].NodeID
 	})
 
-	client := &http.Client{Timeout: 5 * time.Second}
 	for i := range candidates {
 		cand := candidates[i]
-		candEndpoint := strings.TrimRight(cand.LanURL, "/") + "/api/sync/gas-hub"
-		resp, err := client.Post(candEndpoint, "application/json", bytes.NewReader(payloadBytes))
-		if err != nil {
+		bestURL, latMs, ok := h.selectBestNodeURL(collectNodeURLs(cand), preferredIP)
+		if !ok {
 			continue
 		}
-		respBytes, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			continue
-		}
-		var parsed hubSyncResponse
-		if json.Unmarshal(respBytes, &parsed) == nil && parsed.Success {
-			log.Printf("🔄 [Failover] Master หลักไม่ตอบสนอง — สลับไปซิงค์ผ่าน %s (%s) แทน", cand.Hostname, cand.LanURL)
-			return &parsed, &cand, nil
+		parsed, err := postSyncPayload(strings.TrimRight(bestURL, "/")+"/api/sync/gas-hub", payloadBytes, 8*time.Second)
+		if err == nil {
+			log.Printf("⚡ [LAN/WiFi] ซิงค์ตรงผ่าน %s (%s • %dms)", cand.Hostname, bestURL, latMs)
+			return parsed, &cand, bestURL, latMs, nil
 		}
 	}
 
-	return nil, nil, fmt.Errorf("all failover peers unreachable")
+	return nil, nil, "", 0, fmt.Errorf("all LAN/WiFi peers unreachable")
 }
 
 // GasHubCompatibleEndpoint handles POST/GET /api/sync/gas-hub with the exact same logic as Google Apps Script:
@@ -652,12 +1009,15 @@ func (h *SyncHandler) tryFailoverSync(payloadBytes []byte, primaryEndpoint, self
 // - Merges the incoming snapshot into DB and returns the full merged snapshot + active_nodes list
 func (h *SyncHandler) GasHubCompatibleEndpoint(c *fiber.Ctx) error {
 	var body struct {
-		Action     string        `json:"action"`
-		NodeID     string        `json:"node_id"`
-		Hostname   string        `json:"hostname"`
-		LanURL     string        `json:"lan_url"`
-		TimeoutSec int           `json:"timeout_sec"`
-		Snapshot   *SyncSnapshot `json:"snapshot"`
+		Action         string        `json:"action"`
+		NodeID         string        `json:"node_id"`
+		Hostname       string        `json:"hostname"`
+		LanURL         string        `json:"lan_url"`
+		LanURLs        []string      `json:"lan_urls"`
+		IsMaster       bool          `json:"is_master"`
+		StabilityScore float64       `json:"stability_score"`
+		TimeoutSec     int           `json:"timeout_sec"`
+		Snapshot       *SyncSnapshot `json:"snapshot"`
 	}
 	_ = c.BodyParser(&body)
 
@@ -682,17 +1042,21 @@ func (h *SyncHandler) GasHubCompatibleEndpoint(c *fiber.Ctx) error {
 			cCnt = len(body.Snapshot.Certificates)
 		}
 		h.activeNodes[body.NodeID] = ActiveNodeInfo{
-			NodeID:       body.NodeID,
-			Hostname:     body.Hostname,
-			LanURL:       body.LanURL,
-			LastSeenMs:   now.UnixMilli(),
-			LastSeenText: now.Format("2006-01-02 15:04:05"),
-			UsersCount:   uCnt,
-			LessonsCount: lCnt,
-			CertsCount:   cCnt,
+			NodeID:         body.NodeID,
+			Hostname:       body.Hostname,
+			LanURL:         body.LanURL,
+			LanURLs:        body.LanURLs,
+			IsMaster:       body.IsMaster,
+			StabilityScore: body.StabilityScore,
+			LastSeenMs:     now.UnixMilli(),
+			LastSeenText:   now.Format("2006-01-02 15:04:05"),
+			UsersCount:     uCnt,
+			LessonsCount:   lCnt,
+			CertsCount:     cCnt,
 		}
 	}
 	activeList := h.pruneExpiredNodesLocked()
+	h.electSingleMasterLocked(activeList, h.cfg.PreferredMasterID)
 	h.updateKnownPeersLocked(activeList)
 	h.mu.Unlock()
 
