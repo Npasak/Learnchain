@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,10 +39,11 @@ type ActiveNodeInfo struct {
 
 // SyncConfig stores persistent Auto-Sync settings for this machine
 type SyncConfig struct {
-	GasURL          string `json:"gas_url"`
-	AutoSyncEnabled bool   `json:"auto_sync_enabled"`
-	IntervalSec     int    `json:"interval_sec"`
-	TimeoutSec      int    `json:"timeout_sec"`
+	GasURL          string           `json:"gas_url"`
+	AutoSyncEnabled bool             `json:"auto_sync_enabled"`
+	IntervalSec     int              `json:"interval_sec"`
+	TimeoutSec      int              `json:"timeout_sec"`
+	KnownPeers      []ActiveNodeInfo `json:"known_peers,omitempty"`
 }
 
 type SyncHandler struct {
@@ -93,6 +95,11 @@ func (h *SyncHandler) loadConfigFromFile() {
 			loaded.TimeoutSec = 180
 		}
 		h.cfg = loaded
+		for _, p := range loaded.KnownPeers {
+			if p.NodeID != "" && p.LanURL != "" {
+				h.activeNodes[p.NodeID] = p
+			}
+		}
 	}
 }
 
@@ -469,40 +476,41 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Post(endpointURL, "application/json", bytes.NewReader(payloadBytes))
-	if err != nil {
-		h.mu.Lock()
-		h.lastSyncAt = time.Now().Format("15:04:05")
-		h.lastSyncStatus = "❌ เชื่อมต่อไม่สำเร็จ: " + err.Error()
-		h.mu.Unlock()
-		return nil, fmt.Errorf("ไม่สามารถเชื่อมต่อกับ URL (%s): %v", targetURL, err)
-	}
-	defer resp.Body.Close()
+	var hubResp hubSyncResponse
+	var failoverPeer *ActiveNodeInfo
 
-	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("อ่านข้อมูลตอบกลับไม่สำเร็จ: %v", err)
-	}
-
-	var hubResp struct {
-		Success     bool             `json:"success"`
-		Error       string           `json:"error"`
-		OnlineCount int              `json:"online_count"`
-		ActiveNodes []ActiveNodeInfo `json:"active_nodes"`
-		Snapshot    *SyncSnapshot    `json:"snapshot"`
-	}
-	if err := json.Unmarshal(respBytes, &hubResp); err != nil || !hubResp.Success {
-		errMsg := hubResp.Error
-		if errMsg == "" {
-			errMsg = "รูปแบบข้อมูลตอบกลับจาก Google Apps Script ไม่ถูกต้อง"
+		// Primary Master / Hub unreachable -> attempt deterministic LAN Failover to another active peer
+		fbResp, fbPeer, fbErr := h.tryFailoverSync(payloadBytes, endpointURL, nodeID, primaryLanURL)
+		if fbErr != nil {
+			h.mu.Lock()
+			h.lastSyncAt = time.Now().Format("15:04:05")
+			h.lastSyncStatus = "❌ เชื่อมต่อ Master และ Failover Peer ไม่สำเร็จ: " + err.Error()
+			h.mu.Unlock()
+			return nil, fmt.Errorf("ไม่สามารถเชื่อมต่อกับ URL (%s) และไม่พบ Peer สำรอง: %v", targetURL, err)
 		}
-		h.mu.Lock()
-		h.lastSyncAt = time.Now().Format("15:04:05")
-		h.lastSyncStatus = "❌ " + errMsg
-		h.mu.Unlock()
-		return nil, fmt.Errorf("%s", errMsg)
+		hubResp = *fbResp
+		failoverPeer = fbPeer
+	} else {
+		defer resp.Body.Close()
+		respBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("อ่านข้อมูลตอบกลับไม่สำเร็จ: %v", readErr)
+		}
+		if err := json.Unmarshal(respBytes, &hubResp); err != nil || !hubResp.Success {
+			errMsg := hubResp.Error
+			if errMsg == "" {
+				errMsg = "รูปแบบข้อมูลตอบกลับจาก Google Apps Script ไม่ถูกต้อง"
+			}
+			h.mu.Lock()
+			h.lastSyncAt = time.Now().Format("15:04:05")
+			h.lastSyncStatus = "❌ " + errMsg
+			h.mu.Unlock()
+			return nil, fmt.Errorf("%s", errMsg)
+		}
 	}
 
-	// Merge cloud snapshot into local DB
+	// Merge cloud/hub snapshot into local DB
 	var mergedStats fiber.Map
 	if hubResp.Snapshot != nil {
 		mergedStats = MergeSnapshot(hubResp.Snapshot)
@@ -517,8 +525,13 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	}
 	h.touchSelfNode()
 	activeList := h.pruneExpiredNodesLocked()
+	h.updateKnownPeersLocked(activeList)
 	h.lastSyncAt = time.Now().Format("15:04:05")
-	h.lastSyncStatus = fmt.Sprintf("✅ ซิงค์สำเร็จ (ออนไลน์ %d เครื่อง)", len(activeList))
+	if failoverPeer != nil {
+		h.lastSyncStatus = fmt.Sprintf("🔄 Failover: ซิงค์ผ่าน %s (%s) แทน Master (ออนไลน์ %d เครื่อง)", failoverPeer.Hostname, failoverPeer.LanURL, len(activeList))
+	} else {
+		h.lastSyncStatus = fmt.Sprintf("✅ ซิงค์สำเร็จ (ออนไลน์ %d เครื่อง)", len(activeList))
+	}
 	h.mu.Unlock()
 
 	// Also push/pull directly with any other active LAN peers discovered in ActiveNodes
@@ -547,6 +560,89 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 		"last_sync_at":     h.lastSyncAt,
 		"last_sync_status": h.lastSyncStatus,
 	}, nil
+}
+
+type hubSyncResponse struct {
+	Success     bool             `json:"success"`
+	Error       string           `json:"error"`
+	OnlineCount int              `json:"online_count"`
+	ActiveNodes []ActiveNodeInfo `json:"active_nodes"`
+	Snapshot    *SyncSnapshot    `json:"snapshot"`
+}
+
+// updateKnownPeersLocked persists non-self peers into SyncConfig so Failover works across restarts.
+func (h *SyncHandler) updateKnownPeersLocked(activeList []ActiveNodeInfo) {
+	var peers []ActiveNodeInfo
+	for _, n := range activeList {
+		if !n.IsSelf && n.LanURL != "" {
+			peers = append(peers, n)
+		}
+	}
+	h.cfg.KnownPeers = peers
+	h.saveConfigToFile()
+}
+
+// tryFailoverSync deterministically selects an online LAN peer to act as temporary Master/Hub
+// when the configured primary Master or Hub URL is unreachable.
+func (h *SyncHandler) tryFailoverSync(payloadBytes []byte, primaryEndpoint, selfNodeID, selfLanURL string) (*hubSyncResponse, *ActiveNodeInfo, error) {
+	h.mu.Lock()
+	seen := make(map[string]ActiveNodeInfo)
+	for _, n := range h.activeNodes {
+		if n.NodeID != "" && n.NodeID != selfNodeID && n.LanURL != "" && n.LanURL != selfLanURL {
+			seen[n.NodeID] = n
+		}
+	}
+	for _, n := range h.cfg.KnownPeers {
+		if n.NodeID != "" && n.NodeID != selfNodeID && n.LanURL != "" && n.LanURL != selfLanURL {
+			if _, exists := seen[n.NodeID]; !exists {
+				seen[n.NodeID] = n
+			}
+		}
+	}
+	h.mu.Unlock()
+
+	if len(seen) == 0 {
+		return nil, nil, fmt.Errorf("no known failover peers")
+	}
+
+	var candidates []ActiveNodeInfo
+	for _, n := range seen {
+		candEndpoint := strings.TrimRight(n.LanURL, "/") + "/api/sync/gas-hub"
+		if strings.EqualFold(candEndpoint, primaryEndpoint) {
+			continue
+		}
+		candidates = append(candidates, n)
+	}
+	if len(candidates) == 0 {
+		return nil, nil, fmt.Errorf("no reachable failover candidates")
+	}
+
+	// Sort deterministically by NodeID so all remaining peers elect the same failover leader
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].NodeID < candidates[j].NodeID
+	})
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	for i := range candidates {
+		cand := candidates[i]
+		candEndpoint := strings.TrimRight(cand.LanURL, "/") + "/api/sync/gas-hub"
+		resp, err := client.Post(candEndpoint, "application/json", bytes.NewReader(payloadBytes))
+		if err != nil {
+			continue
+		}
+		respBytes, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			continue
+		}
+		var parsed hubSyncResponse
+		if json.Unmarshal(respBytes, &parsed) == nil && parsed.Success {
+			log.Printf("🔄 [Failover] Master หลักไม่ตอบสนอง — สลับไปซิงค์ผ่าน %s (%s) แทน", cand.Hostname, cand.LanURL)
+			return &parsed, &cand, nil
+		}
+	}
+
+	return nil, nil, fmt.Errorf("all failover peers unreachable")
 }
 
 // GasHubCompatibleEndpoint handles POST/GET /api/sync/gas-hub with the exact same logic as Google Apps Script:
@@ -596,6 +692,7 @@ func (h *SyncHandler) GasHubCompatibleEndpoint(c *fiber.Ctx) error {
 		}
 	}
 	activeList := h.pruneExpiredNodesLocked()
+	h.updateKnownPeersLocked(activeList)
 	h.mu.Unlock()
 
 	mergedSnap := BuildSnapshot()
