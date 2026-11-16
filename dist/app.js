@@ -2915,13 +2915,26 @@ async function loadSyncInfo(populateInputs = false) {
 
   const isGod = !!res.is_god_therunrock;
   const gasGroup = document.getElementById('syncGasUrlGroup');
-  const gasHiddenNotice = document.getElementById('syncGasHiddenNotice');
   const btnCopyGas = document.getElementById('btnCopyGasScript');
   const masterOverrideGroup = document.getElementById('syncMasterOverrideGroup');
   if (gasGroup) gasGroup.classList.toggle('hidden', !isGod);
   if (btnCopyGas) btnCopyGas.classList.toggle('hidden', !isGod);
   if (masterOverrideGroup) masterOverrideGroup.classList.toggle('hidden', !isGod);
-  if (gasHiddenNotice) gasHiddenNotice.classList.toggle('hidden', isGod);
+
+  const gasDot = document.getElementById('syncGasStatusDot');
+  const gasLabel = document.getElementById('syncGasStatusLabel');
+  if (gasDot && gasLabel) {
+    const st = res.gas_status || 'standby';
+    const colorMap = {
+      connected: { bg: '#10b981', glow: '0 0 7px rgba(16,185,129,0.65)' },
+      standby:   { bg: '#f59e0b', glow: '0 0 7px rgba(245,158,11,0.65)' },
+      error:     { bg: '#ef4444', glow: '0 0 7px rgba(239,68,68,0.65)' }
+    };
+    const c = colorMap[st] || colorMap.standby;
+    gasDot.style.background = c.bg;
+    gasDot.style.boxShadow = c.glow;
+    gasLabel.innerText = `สถานะการเชื่อมต่อ GAS: ${res.gas_status_text || 'รอเชื่อมต่อ'}`;
+  }
 
   const transportBanner = document.getElementById('syncTransportBanner');
   if (transportBanner) {

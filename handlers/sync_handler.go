@@ -64,6 +64,8 @@ type SyncHandler struct {
 	lastSyncAt       string
 	lastSyncStatus   string
 	syncTransport    string
+	gasStatus        string // "connected" | "standby" | "error"
+	gasStatusText    string
 	activeNodes      map[string]ActiveNodeInfo
 	startedAt        time.Time
 	computeScore     float64
@@ -92,6 +94,8 @@ func NewSyncHandler() *SyncHandler {
 		startedAt:     time.Now(),
 		computeScore:  measureComputeScore(),
 		syncTransport: "LAN/WiFi Auto",
+		gasStatus:     "standby",
+		gasStatusText: "รอเชื่อมต่อ GAS Signaling...",
 	}
 	h.loadConfigFromFile()
 	if strings.TrimSpace(h.cfg.GasURL) == "" {
@@ -430,6 +434,8 @@ func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 	lastSyncAt := h.lastSyncAt
 	lastSyncStatus := h.lastSyncStatus
 	syncTransport := h.syncTransport
+	gasStatus := h.gasStatus
+	gasStatusText := h.gasStatusText
 	masterID := h.electedMasterID
 	masterIP := h.electedMasterIP
 	localScore := h.selfStabilityScoreLocked()
@@ -448,6 +454,8 @@ func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 		"elected_master_id":     masterID,
 		"elected_master_ip":     masterIP,
 		"sync_transport":        syncTransport,
+		"gas_status":            gasStatus,
+		"gas_status_text":       gasStatusText,
 		"local_stability_score": localScore,
 		"user_count":            userCount,
 		"lesson_count":          lessonCount,
@@ -588,8 +596,10 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	isGASSignaling := strings.Contains(targetURL, "script.google.com")
 	if isGASSignaling && targetURL != "" {
 		signalNodes, sigErr := h.sendGASSignal(targetURL, nodeID, hostname, primaryLanURL, lanURLs, timeoutSec, isSelfMaster, selfScore, localSnap)
-		if sigErr == nil && len(signalNodes) > 0 {
+		if sigErr == nil {
 			h.mu.Lock()
+			h.gasStatus = "connected"
+			h.gasStatusText = "เชื่อมต่อ GAS Signaling ปกติ"
 			for _, n := range signalNodes {
 				if n.NodeID != "" && n.NodeID != nodeID {
 					n.IsSelf = false
@@ -597,7 +607,17 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 				}
 			}
 			h.mu.Unlock()
+		} else {
+			h.mu.Lock()
+			h.gasStatus = "error"
+			h.gasStatusText = "ไม่สามารถเชื่อมต่อ GAS Signaling ได้"
+			h.mu.Unlock()
 		}
+	} else if targetURL == "" {
+		h.mu.Lock()
+		h.gasStatus = "standby"
+		h.gasStatusText = "ยังไม่ได้ตั้งค่า GAS Signaling"
+		h.mu.Unlock()
 	}
 
 	// Step B: Elect 1 single Master based on overall stability/performance score (resolves multi-Master conflicts)
