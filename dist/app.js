@@ -4674,7 +4674,7 @@ function printCreatorCertificateA4() {
   const selectedSig = selectedSigIds.map(id => allSignatoriesCache.find(s => s.id === id)).filter(Boolean);
 
   let periodLabel = 'ตลอดระยะเวลาทั้งหมด';
-  if (startVal && endVal) periodLabel = `${formatThaiDateShort(startVal)} ถึง ${formatThaiDateShort(endVal)}`;
+  if (startVal && endVal) periodLabel = `ระหว่าง ${formatThaiDateShort(startVal)} ถึง ${formatThaiDateShort(endVal)}`;
   else if (startVal) periodLabel = `ตั้งแต่ ${formatThaiDateShort(startVal)} เป็นต้นไป`;
   else if (endVal) periodLabel = `จนถึง ${formatThaiDateShort(endVal)}`;
 
@@ -4745,8 +4745,9 @@ function printCreatorCertificateA4() {
           <div style="font-size:12.5px; color:#475569;">ขอมอบวุฒิบัตรฉบับนี้ไว้เพื่อแสดงว่า</div>
           <div style="font-size:22px; font-weight:800; color:#0284c7; margin:4px 0;">${escapeHtml(creatorName)}</div>
           <div style="font-size:12.5px; color:#334155; line-height:1.7; max-width:92%; margin:4px auto 0;">
-            ขอขอบคุณ <strong>${escapeHtml(creatorName)}</strong> ที่ทุ่มเทแรงกายและหัวใจถ่ายทอดองค์ความรู้ทางการพยาบาลผ่านบทเรียนออนไลน์
-            <strong>${escapeHtml(periodLabel)}</strong> เพื่อเป็นรากฐานสำคัญในการดูแลและรักษาชีวิตผู้คนสืบไป
+            ขอขอบคุณ <strong>${escapeHtml(creatorName)}</strong> ที่ได้อุสาหะทุ่มเทแรงกายและแรงใจ
+            ในถ่ายทอดองค์ความรู้ทางการพยาบาลผ่านบทเรียนออนไลน์ <strong>${escapeHtml(periodLabel)}</strong>
+            เพื่อเป็นรากฐานสำคัญในการดูแลและรักษาชีวิตผู้ป่วยสืบไปต่อไป
           </div>
         </div>
 
