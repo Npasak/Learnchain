@@ -98,9 +98,18 @@ func NewSyncHandler() *SyncHandler {
 		gasStatusText: "รอเชื่อมต่อ GAS Signaling...",
 	}
 	h.loadConfigFromFile()
-	if strings.TrimSpace(h.cfg.GasURL) == "" {
+	// Migrate legacy .sync.json where a LAN IP was stored in gas_url instead of a GAS URL
+	if trimmed := strings.TrimSpace(h.cfg.GasURL); trimmed == "" || !strings.Contains(trimmed, "script.google.com") {
+		if trimmed != "" {
+			h.cfg.KnownPeers = append(h.cfg.KnownPeers, ActiveNodeInfo{
+				NodeID:   trimmed,
+				Hostname: "Legacy-Hub",
+				LanURL:   strings.TrimRight(trimmed, "/"),
+			})
+		}
 		h.cfg.GasURL = DefaultGASSignalingURL
 		h.cfg.AutoSyncEnabled = true
+		h.saveConfigToFile()
 	}
 	h.touchSelfNode()
 	GlobalSyncHandler = h
@@ -593,9 +602,12 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	localSnap := BuildSnapshot()
 
 	// Step A: Lightweight GAS Signaling (discover peers/IPs/scores without sending heavy snapshot)
-	isGASSignaling := strings.Contains(targetURL, "script.google.com")
-	if isGASSignaling && targetURL != "" {
-		signalNodes, sigErr := h.sendGASSignal(targetURL, nodeID, hostname, primaryLanURL, lanURLs, timeoutSec, isSelfMaster, selfScore, localSnap)
+	gasEndpoint := targetURL
+	if !strings.Contains(gasEndpoint, "script.google.com") {
+		gasEndpoint = DefaultGASSignalingURL
+	}
+	if gasEndpoint != "" {
+		signalNodes, sigErr := h.sendGASSignal(gasEndpoint, nodeID, hostname, primaryLanURL, lanURLs, timeoutSec, isSelfMaster, selfScore, localSnap)
 		if sigErr == nil {
 			h.mu.Lock()
 			h.gasStatus = "connected"
@@ -613,11 +625,6 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 			h.gasStatusText = "ไม่สามารถเชื่อมต่อ GAS Signaling ได้"
 			h.mu.Unlock()
 		}
-	} else if targetURL == "" {
-		h.mu.Lock()
-		h.gasStatus = "standby"
-		h.gasStatusText = "ยังไม่ได้ตั้งค่า GAS Signaling"
-		h.mu.Unlock()
 	}
 
 	// Step B: Elect 1 single Master based on overall stability/performance score (resolves multi-Master conflicts)
@@ -682,28 +689,17 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 
 	// Step D: Automatic GAS Fallback ONLY if direct LAN/WiFi/IP transfer failed or no LAN peers exist
 	if !directSuccess {
-		if targetURL == "" {
-			h.mu.Lock()
-			h.syncFailCount++
-			h.lastSyncAt = time.Now().Format("15:04:05")
-			h.lastSyncStatus = "❌ ไม่พบเครื่องอื่นในวง LAN และยังไม่ได้ตั้งค่า GAS"
-			h.syncTransport = "Offline"
-			h.mu.Unlock()
-			return nil, fmt.Errorf("ไม่พบเครื่องอื่นในวง LAN/WiFi และยังไม่ได้ตั้งค่า URL สำรอง")
+		fallbackURL := gasEndpoint
+		if fallbackURL == "" {
+			fallbackURL = DefaultGASSignalingURL
 		}
 
-		endpointURL := targetURL
-		if !isGASSignaling && !strings.Contains(endpointURL, "/api/sync/") {
-			if !strings.HasPrefix(endpointURL, "http://") && !strings.HasPrefix(endpointURL, "https://") {
-				endpointURL = "http://" + endpointURL
-			}
-			endpointURL = strings.TrimRight(endpointURL, "/") + "/api/sync/gas-hub"
-		}
-
-		respData, err := postSyncPayload(endpointURL, payloadBytes, 20*time.Second)
+		respData, err := postSyncPayload(fallbackURL, payloadBytes, 25*time.Second)
 		if err != nil {
 			h.mu.Lock()
 			h.syncFailCount++
+			h.gasStatus = "error"
+			h.gasStatusText = "เชื่อมต่อ GAS ไม่สำเร็จ"
 			h.lastSyncAt = time.Now().Format("15:04:05")
 			h.lastSyncStatus = "❌ เชื่อมต่อ LAN และ GAS Fallback ไม่สำเร็จ: " + err.Error()
 			h.syncTransport = "Offline"
@@ -711,11 +707,11 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 			return nil, fmt.Errorf("เชื่อมต่อ LAN และ GAS Fallback ไม่สำเร็จ: %v", err)
 		}
 		hubResp = *respData
-		if isGASSignaling {
-			usedTransport = "GAS Fallback (อัตโนมัติ)"
-		} else {
-			usedTransport = "Direct Hub (" + endpointURL + ")"
-		}
+		usedTransport = "GAS Fallback (อัตโนมัติ)"
+		h.mu.Lock()
+		h.gasStatus = "connected"
+		h.gasStatusText = "เชื่อมต่อผ่าน GAS Fallback ปกติ"
+		h.mu.Unlock()
 	}
 
 	// Merge snapshot into local DB
@@ -814,7 +810,7 @@ func (h *SyncHandler) sendGASSignal(gasURL, nodeID, hostname, primaryLanURL stri
 		"certs_count":     len(localSnap.Certificates),
 	}
 	b, _ := json.Marshal(sigPayload)
-	client := &http.Client{Timeout: 8 * time.Second}
+	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(gasURL, "application/json", bytes.NewReader(b))
 	if err != nil {
 		return nil, err
