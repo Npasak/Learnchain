@@ -3211,12 +3211,16 @@ async function importSyncSnapshotFile(event) {
 
 async function refreshCurrentPortalAfterSync() {
   if (!currentUser || !currentUserID) return;
-  await fetchCurrentUser();
-  if (activeRole === 'learner') {
+  const meRes = await fetchJSON('/api/auth/me');
+  if (meRes && meRes.success && meRes.user) {
+    currentUser = meRes.user;
+  }
+  const role = (currentUser && currentUser.role) ? currentUser.role : 'learner';
+  if (role === 'learner') {
     await loadLearnerDashboard();
-  } else if (activeRole === 'creator') {
+  } else if (role === 'creator') {
     await loadCreatorDashboard();
-  } else if (activeRole === 'manager') {
+  } else if (role === 'manager') {
     await loadManagerDashboard();
   }
 }
