@@ -207,9 +207,10 @@ type SyncSnapshot struct {
 	SourceHost   string               `json:"source_host"`
 	Users        []SyncUserDTO        `json:"users"`
 	Courses      []models.Course      `json:"courses"`
-	Lessons       []SyncLessonDTO      `json:"lessons"`
-	CoverFiles    []SyncCoverFileDTO   `json:"cover_files,omitempty"`
-	DeletedCovers []string             `json:"deleted_covers,omitempty"`
+	Lessons             []SyncLessonDTO      `json:"lessons"`
+	CoverFiles          []SyncCoverFileDTO   `json:"cover_files,omitempty"`
+	DeletedCovers       []string             `json:"deleted_covers,omitempty"`
+	DeletedLessonTitles []string             `json:"deleted_lesson_titles,omitempty"`
 	Assignments   []SyncAssignmentDTO  `json:"assignments"`
 	ProgressList []SyncProgressDTO    `json:"progress_list"`
 	Certificates []SyncCertificateDTO `json:"certificates"`
@@ -790,10 +791,21 @@ func BuildSnapshot() SyncSnapshot {
 	}
 
 	var deletedLessons []models.Lesson
-	database.DB.Unscoped().Where("deleted_at IS NOT NULL AND thumbnail_url LIKE '/covers/%'").Find(&deletedLessons)
+	database.DB.Unscoped().Where("deleted_at IS NOT NULL").Find(&deletedLessons)
 	seenDeletedCovers := make(map[string]bool)
+	seenDeletedTitles := make(map[string]bool)
+	for _, retired := range database.RetiredDemoLessonTitles {
+		if !seenDeletedTitles[retired] {
+			seenDeletedTitles[retired] = true
+			snap.DeletedLessonTitles = append(snap.DeletedLessonTitles, retired)
+		}
+	}
 	for _, dl := range deletedLessons {
-		if !activeCoverSet[dl.ThumbnailURL] && !seenDeletedCovers[dl.ThumbnailURL] {
+		if dl.Title != "" && !seenDeletedTitles[dl.Title] {
+			seenDeletedTitles[dl.Title] = true
+			snap.DeletedLessonTitles = append(snap.DeletedLessonTitles, dl.Title)
+		}
+		if strings.HasPrefix(dl.ThumbnailURL, "/covers/") && !activeCoverSet[dl.ThumbnailURL] && !seenDeletedCovers[dl.ThumbnailURL] {
 			seenDeletedCovers[dl.ThumbnailURL] = true
 			snap.DeletedCovers = append(snap.DeletedCovers, dl.ThumbnailURL)
 		}
@@ -1005,8 +1017,37 @@ func MergeSnapshot(snap *SyncSnapshot) fiber.Map {
 		}
 	}
 
-	// 3. Merge Lessons & Quizzes
+	// 3. Build blocked/deleted lesson tombstone set so deleted or retired demo lessons never resurrect
+	blockedLessonTitles := make(map[string]bool)
+	for _, retired := range database.RetiredDemoLessonTitles {
+		blockedLessonTitles[retired] = true
+	}
+	for _, dt := range snap.DeletedLessonTitles {
+		if dt != "" {
+			blockedLessonTitles[dt] = true
+		}
+	}
+	var localDeletedLessons []models.Lesson
+	database.DB.Unscoped().Where("deleted_at IS NOT NULL").Find(&localDeletedLessons)
+	for _, dl := range localDeletedLessons {
+		if dl.Title != "" {
+			blockedLessonTitles[dl.Title] = true
+		}
+	}
+	// Soft-delete any locally active lesson that is in the tombstone/retired list
+	if len(blockedLessonTitles) > 0 {
+		var titlesToDelete []string
+		for t := range blockedLessonTitles {
+			titlesToDelete = append(titlesToDelete, t)
+		}
+		database.DB.Where("title IN ?", titlesToDelete).Delete(&models.Lesson{})
+	}
+
+	// Merge Lessons & Quizzes (skipping blocked/deleted lessons)
 	for _, sl := range snap.Lessons {
+		if blockedLessonTitles[sl.Title] {
+			continue
+		}
 		var existingLesson models.Lesson
 		err := database.DB.Where("title = ?", sl.Title).First(&existingLesson).Error
 		if err != nil {
