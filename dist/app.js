@@ -4302,20 +4302,34 @@ async function renderLessonSignatoryCheckboxes(containerId, checkboxClass, exist
   });
 
   box.innerHTML = ordered.map(s => `
-    <label class="sig-drag-item" draggable="true" data-sig-id="${s.id}"
-      style="display:flex; align-items:center; gap:0.5rem; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid var(--border); background:var(--card); cursor:grab; user-select:none;">
-      <span title="ลากเพื่อสลับลำดับ" style="color:var(--muted); font-weight:700; font-size:0.9rem; cursor:grab; padding:0 2px;">⋮⋮</span>
-      <input type="checkbox" class="${checkboxClass}" value="${s.id}" ${selectedIds.has(s.id) ? 'checked' : ''} onchange="updateSignatoryOrderBadges('${containerId}', '${checkboxClass}')">
-      ${s.signature_url ? `<img src="${escapeHtml(s.signature_url)}" alt="sig" style="height:24px; max-width:72px; object-fit:contain; background:#fff; border-radius:4px; padding:1px;">` : ''}
-      <div style="flex:1; line-height:1.3;">
+    <div class="sig-drag-item" data-sig-id="${s.id}"
+      style="display:flex; align-items:center; gap:0.45rem; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid var(--border); background:var(--card);">
+      <input type="checkbox" class="${checkboxClass}" value="${s.id}" ${selectedIds.has(s.id) ? 'checked' : ''} onchange="updateSignatoryOrderBadges('${containerId}', '${checkboxClass}')" style="cursor:pointer;">
+      ${s.signature_url ? `<img src="${escapeHtml(s.signature_url)}" alt="sig" style="height:24px; max-width:68px; object-fit:contain; background:#fff; border-radius:4px; padding:1px;">` : ''}
+      <div style="flex:1; line-height:1.3; min-width:0;">
         <div style="font-weight:700; color:var(--text);">${escapeHtml(s.full_name)}</div>
         <div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(s.position)}</div>
       </div>
-      <span class="sig-order-badge" style="font-size:0.7rem; font-weight:700; color:var(--primary);"></span>
-    </label>
+      <span class="sig-order-badge" style="font-size:0.7rem; font-weight:700; color:var(--primary); white-space:nowrap;"></span>
+      <div style="display:flex; flex-direction:column; gap:2px; flex-shrink:0;">
+        <button type="button" class="btn btn-sm btn-wallet" onclick="moveSignatoryRow(this, -1, '${containerId}', '${checkboxClass}')" title="เลื่อนขึ้น" style="padding:0 5px; font-size:0.65rem; line-height:1.3;">▲</button>
+        <button type="button" class="btn btn-sm btn-wallet" onclick="moveSignatoryRow(this, 1, '${containerId}', '${checkboxClass}')" title="เลื่อนลง" style="padding:0 5px; font-size:0.65rem; line-height:1.3;">▼</button>
+      </div>
+    </div>
   `).join('');
 
-  initSignatoryDragAndDrop(box, containerId, checkboxClass);
+  updateSignatoryOrderBadges(containerId, checkboxClass);
+}
+
+function moveSignatoryRow(btn, dir, containerId, checkboxClass) {
+  const row = btn.closest('.sig-drag-item');
+  const box = document.getElementById(containerId);
+  if (!row || !box) return;
+  if (dir < 0 && row.previousElementSibling) {
+    box.insertBefore(row, row.previousElementSibling);
+  } else if (dir > 0 && row.nextElementSibling) {
+    box.insertBefore(row.nextElementSibling, row);
+  }
   updateSignatoryOrderBadges(containerId, checkboxClass);
 }
 
