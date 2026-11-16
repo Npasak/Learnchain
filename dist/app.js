@@ -1208,7 +1208,7 @@ async function uploadLessonCover(fileInputId, targetUrlInputId, statusId) {
       method: 'POST',
       headers: {
         'X-User-ID': String(currentUserID || ''),
-        'X-Wallet-Address': String(currentWallet || '')
+        'X-Wallet-Address': String((currentUser && currentUser.wallet_address) || '')
       },
       body: fd
     });
@@ -4295,7 +4295,7 @@ async function uploadSignatureFile(file) {
     method: 'POST',
     headers: {
       'X-User-ID': String(currentUserID || ''),
-      'X-Wallet-Address': String(currentWallet || '')
+      'X-Wallet-Address': String((currentUser && currentUser.wallet_address) || '')
     },
     body: fd
   });
