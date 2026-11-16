@@ -4661,7 +4661,10 @@ function printCreatorCertificateA4() {
         <div style="text-align:center; margin-bottom:14px;">
           <div style="font-size:12.5px; color:#475569;">ขอมอบวุฒิบัตรฉบับนี้ไว้เพื่อแสดงว่า</div>
           <div style="font-size:22px; font-weight:800; color:#0284c7; margin:4px 0;">${escapeHtml(creatorName)}</div>
-          <div style="font-size:12px; color:#334155;">ได้สร้างและพัฒนาบทเรียนออนไลน์ทางการพยาบาล ช่วงเวลา: <strong>${escapeHtml(periodLabel)}</strong></div>
+          <div style="font-size:12.5px; color:#334155; line-height:1.7; max-width:92%; margin:4px auto 0;">
+            ขอขอบคุณ <strong>${escapeHtml(creatorName)}</strong> ที่ทุ่มเทแรงกายและหัวใจถ่ายทอดองค์ความรู้ทางการพยาบาลผ่านบทเรียนออนไลน์
+            <strong>${escapeHtml(periodLabel)}</strong> เพื่อเป็นรากฐานสำคัญในการดูแลและรักษาชีวิตผู้คนสืบไป
+          </div>
         </div>
 
         <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:14px;">
