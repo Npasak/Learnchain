@@ -1506,10 +1506,8 @@
             <input type="text" id="ccCreatorNameInput" class="form-input" placeholder="ระบุชื่อ-นามสกุลผู้สร้างบทเรียน">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">ผู้ลงนามรับรอง (หน้า 1):</label>
-            <select id="ccSignatorySelect" class="form-input">
-              <option value="">— ใช้ชื่อหน่วยงานเป็นค่าเริ่มต้น —</option>
-            </select>
+            <label class="form-label">ผู้ลงนามรับรอง (หน้า 1 — เลือก 3 คนจะจัดเรียงเป็นสามเหลี่ยม):</label>
+            <div id="ccSignatoriesBox" style="display:flex; flex-direction:column; gap:0.3rem; max-height:115px; overflow-y:auto; padding:0.45rem; border:1px solid var(--border); border-radius:var(--r); background:var(--bg); font-size:0.8rem;"></div>
           </div>
         </div>
 

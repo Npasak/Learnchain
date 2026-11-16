@@ -4249,20 +4249,34 @@ function renderCertificateSignatoriesHTML(signatories) {
       </div>
     `;
   }
-  const items = signatories.map(s => `
-    <div style="text-align:center; padding:2px 8px; min-width:140px;">
+  const renderOne = (s) => `
+    <div style="text-align:center; padding:2px 8px; min-width:135px; max-width:190px;">
       ${s.signature_url
-        ? `<img src="${escapeHtml(s.signature_url)}" alt="ลายเซ็น" style="max-height:44px; max-width:150px; object-fit:contain; display:block; margin:0 auto 2px;">`
-        : `<div style="height:28px;"></div>`}
-      <div style="border-top:1.5px solid #0284c7; padding-top:4px; margin-top:2px; font-size:11.5px; font-weight:700; color:#0f172a;">
+        ? `<img src="${escapeHtml(s.signature_url)}" alt="ลายเซ็น" style="max-height:40px; max-width:140px; object-fit:contain; display:block; margin:0 auto 2px;">`
+        : `<div style="height:26px;"></div>`}
+      <div style="border-top:1.5px solid #0284c7; padding-top:4px; margin-top:2px; font-size:11px; font-weight:700; color:#0f172a;">
         (${escapeHtml(s.full_name)})
       </div>
-      <div style="font-size:10.5px; font-weight:600; color:#0369a1;">
+      <div style="font-size:10px; font-weight:600; color:#0369a1; line-height:1.3;">
         ${escapeHtml(s.position)}
       </div>
     </div>
-  `).join('');
-  return `<div style="display:flex; justify-content:center; align-items:flex-end; gap:14px; flex-wrap:wrap;">${items}</div>`;
+  `;
+
+  // 3 signatories: arranged in a triangle (1 top-center apex + 2 bottom left/right)
+  if (signatories.length === 3) {
+    return `
+      <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+        <div style="display:flex; justify-content:center;">${renderOne(signatories[0])}</div>
+        <div style="display:flex; justify-content:center; gap:28px;">
+          ${renderOne(signatories[1])}
+          ${renderOne(signatories[2])}
+        </div>
+      </div>
+    `;
+  }
+
+  return `<div style="display:flex; justify-content:center; align-items:flex-end; gap:14px; flex-wrap:wrap;">${signatories.map(renderOne).join('')}</div>`;
 }
 
 async function renderLessonSignatoryCheckboxes(containerId, checkboxClass, existingRaw) {
@@ -4497,15 +4511,7 @@ async function openCreatorCertificateModal() {
     nameInput.value = currentUser.name || '';
   }
 
-  await loadSignatoriesCache();
-  const sigSel = document.getElementById('ccSignatorySelect');
-  if (sigSel) {
-    const opts = ['<option value="">— ใช้ชื่อหน่วยงานเป็นค่าเริ่มต้น —</option>'];
-    allSignatoriesCache.forEach(s => {
-      opts.push(`<option value="${s.id}">${escapeHtml(s.full_name)} (${escapeHtml(s.position)})</option>`);
-    });
-    sigSel.innerHTML = opts.join('');
-  }
+  await renderLessonSignatoryCheckboxes('ccSignatoriesBox', 'ccSigCheck', '');
 
   await loadCreatorCertificateData();
 }
@@ -4587,8 +4593,8 @@ function printCreatorCertificateA4() {
   const creatorName = (document.getElementById('ccCreatorNameInput')?.value || '').trim() || (currentUser ? currentUser.name : 'ผู้สร้างบทเรียน');
   const startVal = document.getElementById('ccStartDateInput')?.value || '';
   const endVal = document.getElementById('ccEndDateInput')?.value || '';
-  const sigId = Number(document.getElementById('ccSignatorySelect')?.value || 0);
-  const selectedSig = sigId ? allSignatoriesCache.filter(s => s.id === sigId) : [];
+  const selectedSigIds = Array.from(document.querySelectorAll('.ccSigCheck:checked')).map(el => Number(el.value)).filter(Boolean);
+  const selectedSig = selectedSigIds.map(id => allSignatoriesCache.find(s => s.id === id)).filter(Boolean);
 
   let periodLabel = 'ตลอดระยะเวลาทั้งหมด';
   if (startVal && endVal) periodLabel = `${formatThaiDateShort(startVal)} ถึง ${formatThaiDateShort(endVal)}`;
