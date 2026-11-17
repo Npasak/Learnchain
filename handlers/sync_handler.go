@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +29,42 @@ import (
 
 // DefaultGASSignalingURL is the built-in lightweight signaling hub for peer/IP discovery and fallback.
 const DefaultGASSignalingURL = "https://script.google.com/macros/s/AKfycbwtsvCyQlQfJ_NMcmwKqpywNX2iJMvNqVcUOX3rhBwD7Nfyu-F_M4dKk_zglcHjT4onJg/exec"
+
+// isPrivateOrLocalHost returns true for loopback and private/link-local LAN IPs so corporate HTTP proxies are bypassed for LAN sync.
+func isPrivateOrLocalHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+var syncHTTPTransport = &http.Transport{
+	Proxy: func(req *http.Request) (*url.URL, error) {
+		if req != nil && req.URL != nil && isPrivateOrLocalHost(req.URL.Hostname()) {
+			return nil, nil
+		}
+		return http.ProxyFromEnvironment(req)
+	},
+	DialContext: (&net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	MaxIdleConns:          20,
+	IdleConnTimeout:       30 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+}
+
+func newSyncHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: syncHTTPTransport,
+	}
+}
 
 // ActiveNodeInfo represents a connected machine in the sync network
 type ActiveNodeInfo struct {
@@ -635,6 +672,7 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	allNodes := h.pruneExpiredNodesLocked()
 	electedMaster := h.electSingleMasterLocked(allNodes, preferredMasterID)
 	selfIsMasterNow := h.isSelfMaster
+	hasKnownPeers := len(h.cfg.KnownPeers) > 0
 	h.mu.Unlock()
 
 	var hubResp hubSyncResponse
@@ -690,9 +728,10 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 		}
 	}
 
-	// Step D: If this machine IS the Master and no other peers are online/reachable yet,
+	// Step D: If this machine IS the Master and there are no other online/known peers yet,
 	// Master simply stays ready on LAN/WiFi and keeps lightweight GAS Signaling active (no heavy GAS fallback upload!).
-	if !directSuccess && selfIsMasterNow {
+	// If other peers exist but direct LAN transfer failed (e.g. corporate firewall/VLAN), fall through to Step E (GAS Fallback) so Master & Peers can exchange snapshots.
+	if !directSuccess && selfIsMasterNow && len(allNodes) <= 1 && !hasKnownPeers {
 		h.mu.Lock()
 		h.touchSelfNode()
 		activeList := h.pruneExpiredNodesLocked()
@@ -781,7 +820,7 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	for _, peer := range activeList {
 		if !peer.IsSelf && peer.LanURL != "" && peer.LanURL != primaryLanURL && peer.LanURL != chosenMasterIP {
 			go func(peerLanURL string) {
-				pClient := &http.Client{Timeout: 4 * time.Second}
+				pClient := newSyncHTTPClient(6 * time.Second)
 				snap := BuildSnapshot()
 				b, _ := json.Marshal(snap)
 				r, e := pClient.Post(strings.TrimRight(peerLanURL, "/")+"/api/sync/import", "application/json", bytes.NewReader(b))
@@ -842,7 +881,7 @@ func (h *SyncHandler) sendGASSignal(gasURL, nodeID, hostname, primaryLanURL stri
 		"certs_count":     len(localSnap.Certificates),
 	}
 	b, _ := json.Marshal(sigPayload)
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := newSyncHTTPClient(15 * time.Second)
 	resp, err := client.Post(gasURL, "application/json", bytes.NewReader(b))
 	if err != nil {
 		return nil, err
@@ -860,7 +899,7 @@ func (h *SyncHandler) sendGASSignal(gasURL, nodeID, hostname, primaryLanURL stri
 }
 
 func postSyncPayload(endpoint string, payloadBytes []byte, timeout time.Duration) (*hubSyncResponse, error) {
-	client := &http.Client{Timeout: timeout}
+	client := newSyncHTTPClient(timeout)
 	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payloadBytes))
 	if err != nil {
 		return nil, err
@@ -912,7 +951,7 @@ func (h *SyncHandler) selectBestNodeURL(urls []string, preferredIP string) (stri
 	ch := make(chan probeRes, len(urls))
 	for _, u := range urls {
 		go func(target string) {
-			client := &http.Client{Timeout: 1800 * time.Millisecond}
+			client := newSyncHTTPClient(2500 * time.Millisecond)
 			start := time.Now()
 			resp, err := client.Get(strings.TrimRight(target, "/") + "/api/sync/ping")
 			if err != nil {
@@ -1803,7 +1842,7 @@ func (h *SyncHandler) PeerSync(c *fiber.Ctx) error {
 		"snapshot":    localSnap,
 	})
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newSyncHTTPClient(20 * time.Second)
 	resp, err := client.Post(peerBase+"/api/sync/gas-hub", "application/json", bytes.NewReader(hubPayload))
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
