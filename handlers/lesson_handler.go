@@ -97,6 +97,12 @@ func (h *LessonHandler) UploadCover(c *fiber.Ctx) error {
 		})
 	}
 
+	if GlobalSyncHandler != nil {
+		if rawBytes, err := os.ReadFile(savePath); err == nil && len(rawBytes) > 0 {
+			go GlobalSyncHandler.UploadCoverToGAS(filename, rawBytes)
+		}
+	}
+
 	return c.JSON(fiber.Map{
 		"success":  true,
 		"filename": filename,

@@ -19,8 +19,13 @@
  */
 
 const NODE_TIMEOUT_MS = 3 * 60 * 1000; // ลบเครื่องที่ไม่ได้ใช้งานเกิน 3 นาที (180 วินาที) อัตโนมัติ
+const PICSYNC_ROOT_FOLDER_ID = "1XZftDla8U8hJ_vYevwj5wixEP_tYP2WL";
+const COVERS_DRIVE_FOLDER_ID = "1FsYjoxZ0Oh3SEAFUR5NaCCSRV-5GVSJ5"; // โฟลเดอร์ PicSync/covers
 
 function doGet(e) {
+  if (e && e.parameter && e.parameter.action === "get_cover" && e.parameter.filename) {
+    return getCoverFromDriveResponse(e.parameter.filename);
+  }
   return handleRequest(e, null);
 }
 
@@ -35,6 +40,17 @@ function doPost(e) {
 }
 
 function handleRequest(e, body) {
+  if (body && body.action === "get_cover" && body.filename) {
+    return getCoverFromDriveResponse(body.filename);
+  }
+  if (body && body.action === "upload_cover" && body.filename && body.data_base64) {
+    saveCoverFilesToDrive([{ filename: body.filename, data_base64: body.data_base64 }]);
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      filename: body.filename
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
   var lock = LockService.getScriptLock();
   lock.tryLock(10000);
   try {
@@ -205,73 +221,94 @@ function mergeSnapshotToSheets(ss, snap) {
     return [c.token_id || "", c.user_email || "", c.lesson_title || "", c.study_hours || 1, c.average_score || 0, c.transaction_hash || "", JSON.stringify(c)];
   });
 
-  // 6. CoverFiles (แบ่ง chunk ไม่เกิน 40,000 ตัวอักษรต่อเซลล์เพื่อไม่เกินลิมิตของ Google Sheet)
-  var cfSheet = getOrCreateSheet(ss, "CoverFiles", ["Filename", "ChunkIndex", "ChunkData"]);
-  mergeCoverFilesSheet(cfSheet, snap.cover_files || []);
+  // 6. CoverFiles — เก็บไฟล์ภาพปกจริงใน Google Drive (PicSync/covers) เพื่อความรวดเร็วและไม่ติดลิมิตเซลล์ของ Sheet
+  saveCoverFilesToDrive(snap.cover_files || []);
 }
 
-function mergeCoverFilesSheet(sheet, incomingFiles) {
+function getOrCreateCoversFolder() {
+  if (COVERS_DRIVE_FOLDER_ID) {
+    try {
+      return DriveApp.getFolderById(COVERS_DRIVE_FOLDER_ID);
+    } catch (e) {}
+  }
+  var root = DriveApp.getFolderById(PICSYNC_ROOT_FOLDER_ID);
+  var it = root.getFoldersByName("covers");
+  if (it.hasNext()) {
+    return it.next();
+  }
+  return root.createFolder("covers");
+}
+
+function mimeTypeForCoverFilename(fname) {
+  var lower = String(fname || "").toLowerCase();
+  if (lower.indexOf(".png") !== -1) return "image/png";
+  if (lower.indexOf(".webp") !== -1) return "image/webp";
+  if (lower.indexOf(".gif") !== -1) return "image/gif";
+  return "image/jpeg";
+}
+
+function saveCoverFilesToDrive(incomingFiles) {
   if (!incomingFiles || incomingFiles.length === 0) return;
-  var CHUNK_SIZE = 40000;
-  var data = sheet.getDataRange().getValues();
-  var fileMap = {};
-  for (var i = 1; i < data.length; i++) {
-    var fname = String(data[i][0] || "");
-    var idx = Number(data[i][1] || 0);
-    var chunk = String(data[i][2] || "");
-    if (!fname || !chunk) continue;
-    if (!fileMap[fname]) fileMap[fname] = [];
-    fileMap[fname][idx] = chunk;
-  }
-  var joinedMap = {};
-  for (var f in fileMap) {
-    joinedMap[f] = fileMap[f].join("");
-  }
-  for (var j = 0; j < incomingFiles.length; j++) {
-    var cf = incomingFiles[j];
-    if (cf && cf.filename && cf.data_base64) {
-      joinedMap[cf.filename] = cf.data_base64;
-    }
-  }
-  var outRows = [];
-  for (var name in joinedMap) {
-    var b64 = joinedMap[name];
-    if (!b64) continue;
-    var chunkIdx = 0;
-    for (var pos = 0; pos < b64.length; pos += CHUNK_SIZE) {
-      outRows.push([name, chunkIdx, b64.substring(pos, pos + CHUNK_SIZE)]);
-      chunkIdx++;
-    }
-  }
-  if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).clearContent();
-  }
-  if (outRows.length > 0) {
-    sheet.getRange(2, 1, outRows.length, 3).setValues(outRows);
+  var folder = getOrCreateCoversFolder();
+  for (var i = 0; i < incomingFiles.length; i++) {
+    var cf = incomingFiles[i];
+    if (!cf || !cf.filename || !cf.data_base64) continue;
+    var existing = folder.getFilesByName(cf.filename);
+    if (existing.hasNext()) continue; // มีไฟล์นี้อยู่แล้ว ไม่ต้องเขียนซ้ำ
+    var decoded = Utilities.base64Decode(cf.data_base64);
+    var blob = Utilities.newBlob(decoded, mimeTypeForCoverFilename(cf.filename), cf.filename);
+    folder.createFile(blob);
   }
 }
 
-function readCoverFilesSheet(ss) {
-  var sheet = ss.getSheetByName("CoverFiles");
-  if (!sheet || sheet.getLastRow() <= 1) return [];
-  var data = sheet.getDataRange().getValues();
-  var fileMap = {};
-  for (var i = 1; i < data.length; i++) {
-    var fname = String(data[i][0] || "");
-    var idx = Number(data[i][1] || 0);
-    var chunk = String(data[i][2] || "");
-    if (!fname || !chunk) continue;
-    if (!fileMap[fname]) fileMap[fname] = [];
-    fileMap[fname][idx] = chunk;
+function readCoverFilesFromDrive() {
+  try {
+    var folder = getOrCreateCoversFolder();
+    var files = folder.getFiles();
+    var res = [];
+    var totalBytes = 0;
+    while (files.hasNext()) {
+      var f = files.next();
+      var size = f.getSize();
+      if (size <= 0 || size > 2 * 1024 * 1024) continue; // ไฟล์ใหญ่เกิน 2MB ให้ดึงผ่าน get_cover แบบรายไฟล์
+      if (totalBytes + size > 6 * 1024 * 1024) break;
+      var bytes = f.getBlob().getBytes();
+      res.push({
+        filename: f.getName(),
+        data_base64: Utilities.base64Encode(bytes)
+      });
+      totalBytes += size;
+    }
+    return res;
+  } catch (e) {
+    return [];
   }
-  var res = [];
-  for (var name in fileMap) {
-    res.push({
-      filename: name,
-      data_base64: fileMap[name].join("")
-    });
+}
+
+function getCoverFromDriveResponse(filename) {
+  try {
+    var folder = getOrCreateCoversFolder();
+    var it = folder.getFilesByName(filename);
+    if (!it.hasNext()) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: "cover not found"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    var f = it.next();
+    var bytes = f.getBlob().getBytes();
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      filename: f.getName(),
+      content_type: mimeTypeForCoverFilename(f.getName()),
+      data_base64: Utilities.base64Encode(bytes)
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: String(err)
+    })).setMimeType(ContentService.MimeType.JSON);
   }
-  return res;
 }
 
 function mergeByKey(sheet, incomingList, keyFn, rowBuilderFn) {
@@ -377,6 +414,6 @@ function readSnapshotFromSheets(ss) {
     assignments: readJsonColumn(ss, "Assignments"),
     progress_list: readJsonColumn(ss, "Progress"),
     certificates: readJsonColumn(ss, "Certificates"),
-    cover_files: readCoverFilesSheet(ss)
+    cover_files: readCoverFilesFromDrive()
   };
 }

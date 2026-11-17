@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,6 +73,51 @@ func TestFetchCoverFromPeers(t *testing.T) {
 	}
 	if !sawNoPeerFetch {
 		t.Errorf("expected ?no_peer_fetch=1 query parameter on peer cover request")
+	}
+	if string(got) != string(wantBytes) {
+		t.Errorf("fetched bytes = %v, want %v", got, wantBytes)
+	}
+	cached, err := os.ReadFile(filepath.Join(coversDir, fname))
+	if err != nil {
+		t.Fatalf("expected cover to be cached in %s: %v", coversDir, err)
+	}
+	if string(cached) != string(wantBytes) {
+		t.Errorf("cached bytes = %v, want %v", cached, wantBytes)
+	}
+}
+
+func TestFetchCoverFromGAS(t *testing.T) {
+	wantBytes := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
+	const fname = "test_gas_cover_sync.png"
+
+	t.Cleanup(func() {
+		_ = os.Remove(filepath.Join(coversDir, fname))
+	})
+	_ = os.Remove(filepath.Join(coversDir, fname))
+
+	gasServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("action") == "get_cover" && r.URL.Query().Get("filename") == fname {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success":     true,
+				"filename":    fname,
+				"data_base64": base64.StdEncoding.EncodeToString(wantBytes),
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer gasServer.Close()
+
+	h := &SyncHandler{
+		cfg: SyncConfig{
+			GasURL: gasServer.URL + "/script.google.com/macros/s/test/exec",
+		},
+	}
+
+	got, ok := h.FetchCoverFromPeers(fname)
+	if !ok {
+		t.Fatalf("FetchCoverFromPeers(%q) via GAS fallback returned ok=false, want true", fname)
 	}
 	if string(got) != string(wantBytes) {
 		t.Errorf("fetched bytes = %v, want %v", got, wantBytes)

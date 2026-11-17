@@ -1965,24 +1965,104 @@ func (h *SyncHandler) FetchCoverFromPeers(fname string) ([]byte, bool) {
 	}
 	h.mu.Unlock()
 
-	if len(candidateURLs) == 0 {
-		return nil, false
+	if len(candidateURLs) > 0 {
+		client := newSyncHTTPClient(3 * time.Second)
+		for _, base := range candidateURLs {
+			resp, err := client.Get(strings.TrimRight(base, "/") + "/covers/" + fname + "?no_peer_fetch=1")
+			if err != nil {
+				continue
+			}
+			ct := strings.ToLower(resp.Header.Get("Content-Type"))
+			data, readErr := io.ReadAll(io.LimitReader(resp.Body, 15*1024*1024))
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && readErr == nil && len(data) > 0 && strings.HasPrefix(ct, "image/") {
+				_ = os.MkdirAll(coversDir, 0755)
+				_ = os.WriteFile(filepath.Join(coversDir, fname), data, 0644)
+				return data, true
+			}
+		}
 	}
 
-	client := newSyncHTTPClient(3 * time.Second)
-	for _, base := range candidateURLs {
-		resp, err := client.Get(strings.TrimRight(base, "/") + "/covers/" + fname + "?no_peer_fetch=1")
-		if err != nil {
-			continue
-		}
-		ct := strings.ToLower(resp.Header.Get("Content-Type"))
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 15*1024*1024))
-		resp.Body.Close()
-		if resp.StatusCode == http.StatusOK && readErr == nil && len(data) > 0 && strings.HasPrefix(ct, "image/") {
-			_ = os.MkdirAll(coversDir, 0755)
-			_ = os.WriteFile(filepath.Join(coversDir, fname), data, 0644)
-			return data, true
-		}
+	return h.FetchCoverFromGAS(fname)
+}
+
+func (h *SyncHandler) getGASEndpoint() string {
+	h.mu.Lock()
+	targetURL := strings.TrimSpace(h.cfg.GasURL)
+	h.mu.Unlock()
+	if strings.Contains(targetURL, "script.google.com") {
+		return targetURL
 	}
-	return nil, false
+	return DefaultGASSignalingURL
+}
+
+// UploadCoverToGAS uploads a single cover image to GAS (which stores it in Google Drive PicSync/covers).
+func (h *SyncHandler) UploadCoverToGAS(filename string, rawBytes []byte) {
+	if h == nil || len(rawBytes) == 0 {
+		return
+	}
+	fname := filepath.Base(filename)
+	if fname == "" || fname == "." || fname == ".." {
+		return
+	}
+	gasEndpoint := h.getGASEndpoint()
+	if gasEndpoint == "" {
+		return
+	}
+	payload, _ := json.Marshal(fiber.Map{
+		"action":      "upload_cover",
+		"filename":    fname,
+		"data_base64": base64.StdEncoding.EncodeToString(rawBytes),
+	})
+	client := newSyncHTTPClient(25 * time.Second)
+	resp, err := client.Post(gasEndpoint, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("⚠️ [Cover->GAS] อัปโหลด %s ไม่สำเร็จ: %v", fname, err)
+		return
+	}
+	resp.Body.Close()
+}
+
+// FetchCoverFromGAS fetches a single missing cover image on-demand from GAS (Google Drive PicSync/covers) and caches it in ./covers/.
+func (h *SyncHandler) FetchCoverFromGAS(fname string) ([]byte, bool) {
+	fname = filepath.Base(fname)
+	if fname == "" || fname == "." || fname == ".." {
+		return nil, false
+	}
+	gasEndpoint := h.getGASEndpoint()
+	if gasEndpoint == "" {
+		return nil, false
+	}
+	sep := "?"
+	if strings.Contains(gasEndpoint, "?") {
+		sep = "&"
+	}
+	reqURL := gasEndpoint + sep + "action=get_cover&filename=" + url.QueryEscape(fname)
+	client := newSyncHTTPClient(15 * time.Second)
+	resp, err := client.Get(reqURL)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 15*1024*1024))
+	if err != nil {
+		return nil, false
+	}
+	var parsed struct {
+		Success    bool   `json:"success"`
+		DataBase64 string `json:"data_base64"`
+	}
+	if err := json.Unmarshal(bodyBytes, &parsed); err != nil || !parsed.Success || parsed.DataBase64 == "" {
+		return nil, false
+	}
+	rawBytes, err := base64.StdEncoding.DecodeString(parsed.DataBase64)
+	if err != nil || len(rawBytes) == 0 {
+		return nil, false
+	}
+	_ = os.MkdirAll(coversDir, 0755)
+	_ = os.WriteFile(filepath.Join(coversDir, fname), rawBytes, 0644)
+	return rawBytes, true
 }
