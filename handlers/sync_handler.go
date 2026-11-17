@@ -28,7 +28,7 @@ import (
 )
 
 // DefaultGASSignalingURL is the built-in lightweight signaling hub for peer/IP discovery and fallback.
-const DefaultGASSignalingURL = "https://script.google.com/macros/s/AKfycbwtsvCyQlQfJ_NMcmwKqpywNX2iJMvNqVcUOX3rhBwD7Nfyu-F_M4dKk_zglcHjT4onJg/exec"
+const DefaultGASSignalingURL = "https://script.google.com/macros/s/AKfycbx5ttiX6_YQjfY4Oo5O8IplLAX5ow6GnIq3pAS46gCmEWqXUdsZh2W7P8XebGB8Uuuusw/exec"
 
 // isPrivateOrLocalHost returns true for loopback and private/link-local LAN IPs so corporate HTTP proxies are bypassed for LAN sync.
 func isPrivateOrLocalHost(host string) bool {
@@ -1202,11 +1202,29 @@ func BuildSnapshot() SyncSnapshot {
 	var lessons []models.Lesson
 	database.DB.Preload("Quizzes.Questions.Options").Order("sort_order asc, id asc").Find(&lessons)
 	courseMap := make(map[uint]string)
-	for _, c := range snap.Courses {
-		courseMap[c.ID] = c.Title
-	}
 	activeCoverSet := make(map[string]bool)
 	seenCoverFiles := make(map[string]bool)
+	collectCover := func(thumbURL string) {
+		if !strings.HasPrefix(thumbURL, "/covers/") {
+			return
+		}
+		activeCoverSet[thumbURL] = true
+		fname := filepath.Base(strings.TrimPrefix(thumbURL, "/covers/"))
+		if fname == "" || fname == "." || fname == ".." || seenCoverFiles[fname] {
+			return
+		}
+		if rawBytes, err := os.ReadFile(filepath.Join(coversDir, fname)); err == nil && len(rawBytes) > 0 {
+			seenCoverFiles[fname] = true
+			snap.CoverFiles = append(snap.CoverFiles, SyncCoverFileDTO{
+				Filename:   fname,
+				DataBase64: base64.StdEncoding.EncodeToString(rawBytes),
+			})
+		}
+	}
+	for _, c := range snap.Courses {
+		courseMap[c.ID] = c.Title
+		collectCover(c.ThumbnailURL)
+	}
 	for _, l := range lessons {
 		snap.Lessons = append(snap.Lessons, SyncLessonDTO{
 			CourseTitle:     courseMap[l.CourseID],
@@ -1226,19 +1244,7 @@ func BuildSnapshot() SyncSnapshot {
 			DisablePostTest: l.DisablePostTest,
 			Quizzes:         l.Quizzes,
 		})
-		if strings.HasPrefix(l.ThumbnailURL, "/covers/") {
-			activeCoverSet[l.ThumbnailURL] = true
-			fname := filepath.Base(strings.TrimPrefix(l.ThumbnailURL, "/covers/"))
-			if fname != "" && fname != "." && fname != ".." && !seenCoverFiles[fname] {
-				if rawBytes, err := os.ReadFile(filepath.Join(coversDir, fname)); err == nil && len(rawBytes) > 0 {
-					seenCoverFiles[fname] = true
-					snap.CoverFiles = append(snap.CoverFiles, SyncCoverFileDTO{
-						Filename:   fname,
-						DataBase64: base64.StdEncoding.EncodeToString(rawBytes),
-					})
-				}
-			}
-		}
+		collectCover(l.ThumbnailURL)
 	}
 
 	var deletedLessons []models.Lesson
@@ -1926,4 +1932,57 @@ func (h *SyncHandler) GetTrayStatus(port string) TrayStatusInfo {
 		UserNodeURL: userNodeURL,
 		MasterNodes: nodes,
 	}
+}
+
+// FetchCoverFromPeers tries to download a missing cover image from any reachable active or known peer
+// and caches it locally in ./covers/.
+func (h *SyncHandler) FetchCoverFromPeers(fname string) ([]byte, bool) {
+	fname = filepath.Base(fname)
+	if fname == "" || fname == "." || fname == ".." {
+		return nil, false
+	}
+
+	selfID, _, selfLanURL, _ := getMachineIdentity()
+	h.mu.Lock()
+	var candidateURLs []string
+	seen := make(map[string]bool)
+	addPeerURLs := func(n ActiveNodeInfo) {
+		if n.NodeID == selfID {
+			return
+		}
+		for _, u := range collectNodeURLs(n) {
+			if u != "" && u != selfLanURL && !seen[u] {
+				seen[u] = true
+				candidateURLs = append(candidateURLs, u)
+			}
+		}
+	}
+	for _, n := range h.activeNodes {
+		addPeerURLs(n)
+	}
+	for _, n := range h.cfg.KnownPeers {
+		addPeerURLs(n)
+	}
+	h.mu.Unlock()
+
+	if len(candidateURLs) == 0 {
+		return nil, false
+	}
+
+	client := newSyncHTTPClient(3 * time.Second)
+	for _, base := range candidateURLs {
+		resp, err := client.Get(strings.TrimRight(base, "/") + "/covers/" + fname + "?no_peer_fetch=1")
+		if err != nil {
+			continue
+		}
+		ct := strings.ToLower(resp.Header.Get("Content-Type"))
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 15*1024*1024))
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && readErr == nil && len(data) > 0 && strings.HasPrefix(ct, "image/") {
+			_ = os.MkdirAll(coversDir, 0755)
+			_ = os.WriteFile(filepath.Join(coversDir, fname), data, 0644)
+			return data, true
+		}
+	}
+	return nil, false
 }

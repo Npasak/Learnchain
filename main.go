@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -198,6 +199,11 @@ func main() {
 	syncGroup.Post("/peer", syncHandler.PeerSync)
 
 	// 7. Disk Covers (uploaded/synced, read-and-close so Windows never locks files on delete) + Embedded Frontend Static Files
+	distFS, err := fs.Sub(embedDir, "dist")
+	if err != nil {
+		log.Fatalf("❌ Failed to access embedded frontend filesystem: %v", err)
+	}
+
 	_ = os.MkdirAll("./covers", 0755)
 	app.Get("/covers/:filename", func(c *fiber.Ctx) error {
 		fname := filepath.Base(c.Params("filename"))
@@ -206,14 +212,22 @@ func main() {
 				c.Type(filepath.Ext(fname))
 				return c.Send(data)
 			}
+			if f, err := distFS.Open("covers/" + fname); err == nil {
+				defer f.Close()
+				if data, readErr := io.ReadAll(f); readErr == nil && len(data) > 0 {
+					c.Type(filepath.Ext(fname))
+					return c.Send(data)
+				}
+			}
+			if c.Query("no_peer_fetch") == "" {
+				if data, ok := syncHandler.FetchCoverFromPeers(fname); ok {
+					c.Type(filepath.Ext(fname))
+					return c.Send(data)
+				}
+			}
 		}
-		return c.Next()
+		return c.SendStatus(fiber.StatusNotFound)
 	})
-
-	distFS, err := fs.Sub(embedDir, "dist")
-	if err != nil {
-		log.Fatalf("❌ Failed to access embedded frontend filesystem: %v", err)
-	}
 
 	app.Use("/", filesystem.New(filesystem.Config{
 		Root:   http.FS(distFS),

@@ -204,6 +204,74 @@ function mergeSnapshotToSheets(ss, snap) {
   }, function(c) {
     return [c.token_id || "", c.user_email || "", c.lesson_title || "", c.study_hours || 1, c.average_score || 0, c.transaction_hash || "", JSON.stringify(c)];
   });
+
+  // 6. CoverFiles (แบ่ง chunk ไม่เกิน 40,000 ตัวอักษรต่อเซลล์เพื่อไม่เกินลิมิตของ Google Sheet)
+  var cfSheet = getOrCreateSheet(ss, "CoverFiles", ["Filename", "ChunkIndex", "ChunkData"]);
+  mergeCoverFilesSheet(cfSheet, snap.cover_files || []);
+}
+
+function mergeCoverFilesSheet(sheet, incomingFiles) {
+  if (!incomingFiles || incomingFiles.length === 0) return;
+  var CHUNK_SIZE = 40000;
+  var data = sheet.getDataRange().getValues();
+  var fileMap = {};
+  for (var i = 1; i < data.length; i++) {
+    var fname = String(data[i][0] || "");
+    var idx = Number(data[i][1] || 0);
+    var chunk = String(data[i][2] || "");
+    if (!fname || !chunk) continue;
+    if (!fileMap[fname]) fileMap[fname] = [];
+    fileMap[fname][idx] = chunk;
+  }
+  var joinedMap = {};
+  for (var f in fileMap) {
+    joinedMap[f] = fileMap[f].join("");
+  }
+  for (var j = 0; j < incomingFiles.length; j++) {
+    var cf = incomingFiles[j];
+    if (cf && cf.filename && cf.data_base64) {
+      joinedMap[cf.filename] = cf.data_base64;
+    }
+  }
+  var outRows = [];
+  for (var name in joinedMap) {
+    var b64 = joinedMap[name];
+    if (!b64) continue;
+    var chunkIdx = 0;
+    for (var pos = 0; pos < b64.length; pos += CHUNK_SIZE) {
+      outRows.push([name, chunkIdx, b64.substring(pos, pos + CHUNK_SIZE)]);
+      chunkIdx++;
+    }
+  }
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).clearContent();
+  }
+  if (outRows.length > 0) {
+    sheet.getRange(2, 1, outRows.length, 3).setValues(outRows);
+  }
+}
+
+function readCoverFilesSheet(ss) {
+  var sheet = ss.getSheetByName("CoverFiles");
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+  var data = sheet.getDataRange().getValues();
+  var fileMap = {};
+  for (var i = 1; i < data.length; i++) {
+    var fname = String(data[i][0] || "");
+    var idx = Number(data[i][1] || 0);
+    var chunk = String(data[i][2] || "");
+    if (!fname || !chunk) continue;
+    if (!fileMap[fname]) fileMap[fname] = [];
+    fileMap[fname][idx] = chunk;
+  }
+  var res = [];
+  for (var name in fileMap) {
+    res.push({
+      filename: name,
+      data_base64: fileMap[name].join("")
+    });
+  }
+  return res;
 }
 
 function mergeByKey(sheet, incomingList, keyFn, rowBuilderFn) {
@@ -308,6 +376,7 @@ function readSnapshotFromSheets(ss) {
     lessons: readJsonColumn(ss, "Lessons"),
     assignments: readJsonColumn(ss, "Assignments"),
     progress_list: readJsonColumn(ss, "Progress"),
-    certificates: readJsonColumn(ss, "Certificates")
+    certificates: readJsonColumn(ss, "Certificates"),
+    cover_files: readCoverFilesSheet(ss)
   };
 }
