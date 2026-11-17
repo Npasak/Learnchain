@@ -765,7 +765,7 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 			fallbackURL = DefaultGASSignalingURL
 		}
 
-		respData, err := postSyncPayload(fallbackURL, payloadBytes, 25*time.Second)
+		respData, err := postSyncPayload(fallbackURL, payloadBytes, 60*time.Second)
 		if err != nil {
 			h.mu.Lock()
 			h.syncFailCount++
