@@ -571,11 +571,45 @@ async function loadLearnerDashboard() {
 
 const RECOMMENDED_LESSONS_LIMIT = 5;
 let showAllOpenLessons = false;
+let showAllAssignedLessons = false;
+let showAllCreatorLessons = false;
+let showAllManagerLessons = false;
+
+function buildLessonsMoreToggleHTML(isExpanded, totalCount, limit, toggleFnName) {
+  if (totalCount <= limit) return '';
+  const extraCount = totalCount - limit;
+  const label = isExpanded
+    ? `🔼 ย่อเหลือ ${limit} บทเรียน`
+    : `📚 เนื้อหาอื่นๆ (อีก ${extraCount} บทเรียน • ทั้งหมด ${totalCount} บท)`;
+  return `
+    <div style="text-align:center; margin-top:0.85rem;">
+      <button type="button" class="btn btn-outline" onclick="${toggleFnName}()" style="min-width:240px;">
+        ${label}
+      </button>
+    </div>
+  `;
+}
 
 function toggleShowAllOpenLessons() {
   showAllOpenLessons = !showAllOpenLessons;
   const input = document.getElementById('learnerSearchInput');
   renderLearnerLessonsUI(input ? input.value : '');
+}
+
+function toggleShowAllAssignedLessons() {
+  showAllAssignedLessons = !showAllAssignedLessons;
+  const input = document.getElementById('learnerSearchInput');
+  renderLearnerLessonsUI(input ? input.value : '');
+}
+
+function toggleShowAllCreatorLessons() {
+  showAllCreatorLessons = !showAllCreatorLessons;
+  renderCreatorLessonsUI();
+}
+
+function toggleShowAllManagerLessons() {
+  showAllManagerLessons = !showAllManagerLessons;
+  filterManagerLessons();
 }
 
 function renderLearnerLessonsUI(filterText = '') {
@@ -612,7 +646,13 @@ function renderLearnerLessonsUI(filterText = '') {
       assignedList.innerHTML = `<p style="color:var(--muted); padding:1rem; text-align:center;">ไม่มีบทเรียนที่ได้รับมอบหมายในขณะนี้</p>`;
     }
   } else {
-    assignedList.innerHTML = filteredAssigned.map(l => createLearnerLessonCard(l, true)).join('');
+    const displayedAssigned = (!query && !showAllAssignedLessons)
+      ? filteredAssigned.slice(0, RECOMMENDED_LESSONS_LIMIT)
+      : filteredAssigned;
+    const assignedMoreBtn = !query
+      ? buildLessonsMoreToggleHTML(showAllAssignedLessons, filteredAssigned.length, RECOMMENDED_LESSONS_LIMIT, 'toggleShowAllAssignedLessons')
+      : '';
+    assignedList.innerHTML = displayedAssigned.map(l => createLearnerLessonCard(l, true)).join('') + assignedMoreBtn;
   }
 
   // 2. Render All Open Lessons (Default: 5 Recommended Lessons unless searching or expanded)
@@ -641,8 +681,8 @@ function renderLearnerLessonsUI(filterText = '') {
     if (!query && filteredOpen.length > RECOMMENDED_LESSONS_LIMIT) {
       toggleWrap.classList.remove('hidden');
       toggleBtn.innerText = showAllOpenLessons
-        ? `🔼 ย่อเหลือ ${RECOMMENDED_LESSONS_LIMIT} บทเรียนแนะนำ`
-        : `🔽 ดูทั้งหมด (${filteredOpen.length} บทเรียน)`;
+        ? `🔼 ย่อเหลือ ${RECOMMENDED_LESSONS_LIMIT} บทเรียน`
+        : `📚 เนื้อหาอื่นๆ (อีก ${filteredOpen.length - RECOMMENDED_LESSONS_LIMIT} บทเรียน • ทั้งหมด ${filteredOpen.length} บท)`;
     } else {
       toggleWrap.classList.add('hidden');
     }
@@ -1075,7 +1115,12 @@ function renderCreatorLessonsUI() {
     return;
   }
 
-  list.innerHTML = allCreatorLessons.map(l => {
+  const displayedCreatorLessons = !showAllCreatorLessons
+    ? allCreatorLessons.slice(0, RECOMMENDED_LESSONS_LIMIT)
+    : allCreatorLessons;
+  const creatorMoreBtn = buildLessonsMoreToggleHTML(showAllCreatorLessons, allCreatorLessons.length, RECOMMENDED_LESSONS_LIMIT, 'toggleShowAllCreatorLessons');
+
+  list.innerHTML = displayedCreatorLessons.map(l => {
     const thumb = l.thumbnail_url || 'https://images.unsplash.com/photo-1622979135225-d2ba269bc1df?q=80&w=400';
     const isHidden = l.is_hidden;
     const studyHours = l.study_hours || 1;
@@ -1113,7 +1158,7 @@ function renderCreatorLessonsUI() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join('') + creatorMoreBtn;
 }
 
 // ─── Creator Actions ───
@@ -1541,7 +1586,13 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
   if (filteredLessons.length === 0) {
     container.innerHTML = '<p style="color:var(--muted); padding:2rem; text-align:center;">ไม่พบบทเรียนที่ตรงกับคำค้นหา</p>';
   } else {
-    container.innerHTML = filteredLessons.map(l => {
+    const displayedManagerLessons = (!query && !showAllManagerLessons)
+      ? filteredLessons.slice(0, RECOMMENDED_LESSONS_LIMIT)
+      : filteredLessons;
+    const managerMoreBtn = !query
+      ? buildLessonsMoreToggleHTML(showAllManagerLessons, filteredLessons.length, RECOMMENDED_LESSONS_LIMIT, 'toggleShowAllManagerLessons')
+      : '';
+    container.innerHTML = displayedManagerLessons.map(l => {
       const candidateLearners = activeWard
         ? allSystemLearners.filter(u => (u.ward || 'สว.11') === activeWard)
         : allSystemLearners;
@@ -1610,7 +1661,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
           </div>
         </div>
       `;
-    }).join('');
+    }).join('') + managerMoreBtn;
   }
 
   // 2. Render Manager Overview KPIs, Ward Summary & Lesson Visual Graphs
