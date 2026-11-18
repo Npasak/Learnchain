@@ -45,7 +45,7 @@ func LoadConfig() *Config {
 	autoOpen, _ := strconv.ParseBool(autoOpenStr)
 
 	AppConfig = &Config{
-		Port:             getEnv("PORT", "8888"),
+		Port:             getEnv("PORT", "80"),
 		DBPath:           getEnv("DB_PATH", "elearning.db"),
 		AutoOpenBrowser:  autoOpen,
 		EthRPCURL:        getEnv("ETH_RPC_URL", ""),

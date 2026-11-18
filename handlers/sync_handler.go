@@ -23,6 +23,7 @@ import (
 	"elearning-sbt/config"
 	"elearning-sbt/database"
 	"elearning-sbt/models"
+	"elearning-sbt/version"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -72,6 +73,8 @@ type ActiveNodeInfo struct {
 	Hostname       string   `json:"hostname"`
 	LanURL         string   `json:"lan_url"`
 	LanURLs        []string `json:"lan_urls,omitempty"`
+	PublicIP       string   `json:"public_ip,omitempty"`
+	AppVersion     string   `json:"app_version,omitempty"`
 	LastSeenMs     int64    `json:"last_seen_ms"`
 	LastSeenText   string   `json:"last_seen_text"`
 	UsersCount     int      `json:"users_count"`
@@ -225,23 +228,31 @@ func (h *SyncHandler) saveConfigToFile() {
 	}
 }
 
+// FormatHTTPURL formats an http:// URL, omitting :80 when using the standard HTTP port.
+func FormatHTTPURL(host, port string) string {
+	if port == "" || port == "80" {
+		return "http://" + host
+	}
+	return fmt.Sprintf("http://%s:%s", host, port)
+}
+
 func getMachineIdentity() (nodeID, hostname, primaryLanURL string, lanURLs []string) {
 	hostname, _ = os.Hostname()
 	if hostname == "" {
 		hostname = "Nurse-PC"
 	}
-	port := "8888"
+	port := "80"
 	if config.AppConfig != nil && config.AppConfig.Port != "" {
 		port = config.AppConfig.Port
 	}
 	ips := GetLocalIPs()
 	for _, ip := range ips {
-		lanURLs = append(lanURLs, fmt.Sprintf("http://%s:%s", ip, port))
+		lanURLs = append(lanURLs, FormatHTTPURL(ip, port))
 	}
 	if len(lanURLs) > 0 {
 		primaryLanURL = lanURLs[0]
 	} else {
-		primaryLanURL = fmt.Sprintf("http://localhost:%s", port)
+		primaryLanURL = FormatHTTPURL("localhost", port)
 	}
 	nodeID = fmt.Sprintf("%s:%s", hostname, port)
 	return
@@ -261,11 +272,17 @@ func (h *SyncHandler) touchSelfNode() ActiveNodeInfo {
 		h.isSelfMaster = true
 		h.electedMasterIP = primaryLanURL
 	}
+	publicIPCache.mu.Lock()
+	cachedPubIP := publicIPCache.ip
+	publicIPCache.mu.Unlock()
+
 	selfNode := ActiveNodeInfo{
 		NodeID:         nodeID,
 		Hostname:       hostname,
 		LanURL:         primaryLanURL,
 		LanURLs:        lanURLs,
+		PublicIP:       cachedPubIP,
+		AppVersion:     version.Version,
 		LastSeenMs:     now.UnixMilli(),
 		LastSeenText:   now.Format("2006-01-02 15:04:05"),
 		UsersCount:     int(uCount),
@@ -436,6 +453,52 @@ func GetLocalIPs() []string {
 	return ips
 }
 
+var publicIPCache struct {
+	mu        sync.Mutex
+	ip        string
+	webOnline bool
+	latencyMs int64
+	checkedAt time.Time
+}
+
+func getPublicIPAndWebStatus() (string, bool, int64) {
+	publicIPCache.mu.Lock()
+	if !publicIPCache.checkedAt.IsZero() && time.Since(publicIPCache.checkedAt) < 5*time.Minute {
+		ip, online, lat := publicIPCache.ip, publicIPCache.webOnline, publicIPCache.latencyMs
+		publicIPCache.mu.Unlock()
+		return ip, online, lat
+	}
+	publicIPCache.mu.Unlock()
+
+	client := newSyncHTTPClient(2500 * time.Millisecond)
+	start := time.Now()
+	ipOut := ""
+	online := false
+	resp, err := client.Get("https://api.ipify.org")
+	lat := time.Since(start).Milliseconds()
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			if b, rErr := io.ReadAll(io.LimitReader(resp.Body, 64)); rErr == nil {
+				candidate := strings.TrimSpace(string(b))
+				if net.ParseIP(candidate) != nil {
+					ipOut = candidate
+					online = true
+				}
+			}
+		}
+	}
+
+	publicIPCache.mu.Lock()
+	publicIPCache.ip = ipOut
+	publicIPCache.webOnline = online
+	publicIPCache.latencyMs = lat
+	publicIPCache.checkedAt = time.Now()
+	publicIPCache.mu.Unlock()
+
+	return ipOut, online, lat
+}
+
 // Ping returns lightweight node status & stability score for fastest-IP benchmarking.
 func (h *SyncHandler) Ping(c *fiber.Ctx) error {
 	nodeID, hostname, primaryLanURL, _ := getMachineIdentity()
@@ -458,7 +521,7 @@ func (h *SyncHandler) Ping(c *fiber.Ctx) error {
 func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 	isGod := requireGodTherunrock(c)
 	nodeID, hostname, primaryLanURL, lanURLs := getMachineIdentity()
-	port := "8888"
+	port := "80"
 	if config.AppConfig != nil && config.AppConfig.Port != "" {
 		port = config.AppConfig.Port
 	}
@@ -484,11 +547,17 @@ func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 	gasStatusText := h.gasStatusText
 	masterID := h.electedMasterID
 	masterIP := h.electedMasterIP
+	isSelfMaster := h.isSelfMaster
+	syncSuccessCount := h.syncSuccessCount
+	syncFailCount := h.syncFailCount
 	localScore := h.selfStabilityScoreLocked()
 	h.mu.Unlock()
 
+	publicIP, webOnline, webLatencyMs := getPublicIPAndWebStatus()
+
 	return c.JSON(fiber.Map{
 		"success":               true,
+		"app_version":           version.Version,
 		"is_god_therunrock":     isGod,
 		"gas_url_hidden":        !isGod,
 		"node_id":               nodeID,
@@ -497,9 +566,15 @@ func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 		"primary_lan_url":       primaryLanURL,
 		"lan_ips":               GetLocalIPs(),
 		"lan_urls":              lanURLs,
+		"public_ip":             publicIP,
+		"web_online":            webOnline,
+		"web_latency_ms":        webLatencyMs,
+		"is_self_master":        isSelfMaster,
 		"elected_master_id":     masterID,
 		"elected_master_ip":     masterIP,
 		"sync_transport":        syncTransport,
+		"sync_success_count":    syncSuccessCount,
+		"sync_fail_count":       syncFailCount,
 		"gas_status":            gasStatus,
 		"gas_status_text":       gasStatusText,
 		"local_stability_score": localScore,
@@ -681,12 +756,15 @@ func (h *SyncHandler) ExecuteCloudAndPeerAutoSync() (fiber.Map, error) {
 	var chosenMasterLatency int64
 
 	// Step C: Direct LAN/WiFi/LocalIP transfer first (benchmarking fastest IP or using user's manual IP)
+	pubIP, _, _ := getPublicIPAndWebStatus()
 	payload := fiber.Map{
 		"action":          "auto_sync",
 		"node_id":         nodeID,
 		"hostname":        hostname,
 		"lan_url":         primaryLanURL,
 		"lan_urls":        lanURLs,
+		"public_ip":       pubIP,
+		"app_version":     version.Version,
 		"is_master":       h.isSelfMaster,
 		"stability_score": selfScore,
 		"timeout_sec":     timeoutSec,
@@ -867,12 +945,15 @@ func (h *SyncHandler) updateKnownPeersLocked(activeList []ActiveNodeInfo) {
 // sendGASSignal sends lightweight peer/IP/score metadata ONLY to GAS (no heavy snapshot)
 // to reduce load on GAS while discovering peers and IPs across networks.
 func (h *SyncHandler) sendGASSignal(gasURL, nodeID, hostname, primaryLanURL string, lanURLs []string, timeoutSec int, isMaster bool, stabilityScore float64, localSnap SyncSnapshot) ([]ActiveNodeInfo, error) {
+	pubIP, _, _ := getPublicIPAndWebStatus()
 	sigPayload := fiber.Map{
 		"action":          "signal",
 		"node_id":         nodeID,
 		"hostname":        hostname,
 		"lan_url":         primaryLanURL,
 		"lan_urls":        lanURLs,
+		"public_ip":       pubIP,
+		"app_version":     version.Version,
 		"is_master":       isMaster,
 		"stability_score": stabilityScore,
 		"timeout_sec":     timeoutSec,
@@ -1101,6 +1182,8 @@ func (h *SyncHandler) GasHubCompatibleEndpoint(c *fiber.Ctx) error {
 		Hostname       string        `json:"hostname"`
 		LanURL         string        `json:"lan_url"`
 		LanURLs        []string      `json:"lan_urls"`
+		PublicIP       string        `json:"public_ip"`
+		AppVersion     string        `json:"app_version"`
 		IsMaster       bool          `json:"is_master"`
 		StabilityScore float64       `json:"stability_score"`
 		TimeoutSec     int           `json:"timeout_sec"`
@@ -1133,6 +1216,8 @@ func (h *SyncHandler) GasHubCompatibleEndpoint(c *fiber.Ctx) error {
 			Hostname:       body.Hostname,
 			LanURL:         body.LanURL,
 			LanURLs:        body.LanURLs,
+			PublicIP:       body.PublicIP,
+			AppVersion:     body.AppVersion,
 			IsMaster:       body.IsMaster,
 			StabilityScore: body.StabilityScore,
 			LastSeenMs:     now.UnixMilli(),
@@ -1826,7 +1911,7 @@ func (h *SyncHandler) PeerSync(c *fiber.Ctx) error {
 		peerBase = "http://" + peerBase
 	}
 	if !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(peerBase, "http://"), "https://"), ":") {
-		peerBase = peerBase + ":8888"
+		peerBase = peerBase + ":80"
 	}
 
 	// Use gas-hub endpoint on peer so active node registration & timeout tracking also happens automatically!
@@ -1839,11 +1924,14 @@ func (h *SyncHandler) PeerSync(c *fiber.Ctx) error {
 
 	nodeID, hostname, primaryLanURL, _ := getMachineIdentity()
 	localSnap := BuildSnapshot()
+	pubIP, _, _ := getPublicIPAndWebStatus()
 	hubPayload, _ := json.Marshal(fiber.Map{
 		"action":      "auto_sync",
 		"node_id":     nodeID,
 		"hostname":    hostname,
 		"lan_url":     primaryLanURL,
+		"public_ip":   pubIP,
+		"app_version": version.Version,
 		"timeout_sec": h.cfg.TimeoutSec,
 		"snapshot":    localSnap,
 	})
@@ -1923,8 +2011,8 @@ func (h *SyncHandler) GetTrayStatus(port string) TrayStatusInfo {
 	if len(ips) > 0 {
 		primaryIP = ips[0]
 	}
-	userNodeURL := fmt.Sprintf("http://%s:%s", primaryIP, port)
-	localURL := fmt.Sprintf("http://localhost:%s", port)
+	userNodeURL := FormatHTTPURL(primaryIP, port)
+	localURL := FormatHTTPURL("localhost", port)
 
 	return TrayStatusInfo{
 		LocalURL:    localURL,

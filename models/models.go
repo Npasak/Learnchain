@@ -307,23 +307,29 @@ type EmailLoginRequest struct {
 
 // LessonRating stores a learner's 1-5 star rating & optional comment for a lesson (1 per user per lesson, anonymous in reports)
 type LessonRating struct {
-	ID        uint           `gorm:"primaryKey" json:"id"`
-	LessonID  uint           `gorm:"not null;uniqueIndex:idx_user_lesson_rating" json:"lesson_id"`
-	UserID    uint           `gorm:"not null;uniqueIndex:idx_user_lesson_rating" json:"-"`
-	Rating    int            `gorm:"not null" json:"rating"` // 1..5
-	Comment   string         `gorm:"type:text" json:"comment"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	LessonID     uint           `gorm:"not null;uniqueIndex:idx_user_lesson_rating" json:"lesson_id"`
+	UserID       uint           `gorm:"not null;uniqueIndex:idx_user_lesson_rating" json:"-"`
+	Rating       int            `gorm:"not null" json:"rating"` // 1..5
+	Comment      string         `gorm:"type:text" json:"comment"`
+	IsReported   bool           `gorm:"default:false" json:"is_reported"`
+	ReportReason string         `gorm:"type:text" json:"report_reason,omitempty"`
+	ReportedBy   string         `json:"reported_by,omitempty"`
+	ReportedAt   *time.Time     `json:"reported_at,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // LessonRatingCommentDTO holds an anonymous learner comment + star rating.
 type LessonRatingCommentDTO struct {
-	ID        uint      `json:"id"`
-	LessonID  uint      `json:"lesson_id"`
-	Rating    int       `json:"rating"`
-	Comment   string    `json:"comment"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           uint      `json:"id"`
+	LessonID     uint      `json:"lesson_id"`
+	Rating       int       `json:"rating"`
+	Comment      string    `json:"comment"`
+	IsReported   bool      `json:"is_reported"`
+	ReportReason string    `json:"report_reason,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // LessonRatingStatsDTO holds aggregated anonymous rating stats (1-5 stars breakdown, average & comments)

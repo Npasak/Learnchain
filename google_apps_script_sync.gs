@@ -136,7 +136,9 @@ function updateAndPruneNodes(ss, body, nowMs, timeoutMs) {
         last_seen_text: String(r[4] || ""),
         users_count: Number(r[5] || 0),
         lessons_count: Number(r[6] || 0),
-        certs_count: Number(r[7] || 0)
+        certs_count: Number(r[7] || 0),
+        public_ip: String(r[8] || ""),
+        app_version: String(r[9] || "")
       };
     }
   }
@@ -152,6 +154,8 @@ function updateAndPruneNodes(ss, body, nowMs, timeoutMs) {
       hostname: String(body.hostname || "Computer"),
       lan_url: String(body.lan_url || ""),
       lan_urls: Array.isArray(body.lan_urls) ? body.lan_urls : [],
+      public_ip: String(body.public_ip || ""),
+      app_version: String(body.app_version || ""),
       is_master: Boolean(body.is_master),
       stability_score: Number(body.stability_score || 0),
       last_seen_ms: nowMs,
@@ -164,7 +168,7 @@ function updateAndPruneNodes(ss, body, nowMs, timeoutMs) {
 
   // เขียนตาราง ActiveNodes ใหม่เฉพาะเครื่องที่ยังออนไลน์อยู่
   if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, 8).clearContent();
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 10).clearContent();
   }
   var activeList = [];
   var writeRows = [];
@@ -173,11 +177,11 @@ function updateAndPruneNodes(ss, body, nowMs, timeoutMs) {
     activeList.push(n);
     writeRows.push([
       n.node_id, n.hostname, n.lan_url, n.last_seen_ms, n.last_seen_text,
-      n.users_count, n.lessons_count, n.certs_count
+      n.users_count, n.lessons_count, n.certs_count, n.public_ip || "", n.app_version || ""
     ]);
   }
   if (writeRows.length > 0) {
-    sheet.getRange(2, 1, writeRows.length, 8).setValues(writeRows);
+    sheet.getRange(2, 1, writeRows.length, 10).setValues(writeRows);
   }
   return activeList;
 }

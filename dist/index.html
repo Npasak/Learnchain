@@ -159,12 +159,6 @@
         </div>
       </div>
 
-      <div style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px dashed var(--border); text-align:center;">
-        <button type="button" class="btn btn-sm btn-wallet" onclick="openSyncModal()" title="เชื่อมต่อหรือซิงค์ข้อมูลระหว่างเครื่อง">
-          🔄 ซิงค์เครื่อง / เชื่อมต่อข้ามเครื่อง
-        </button>
-      </div>
-
     </div>
   </div>
 
@@ -199,9 +193,6 @@
           <span id="navUserIdentity" class="nav-user-identity">👤 กำลังโหลด...</span>
           <button id="btnEditProfile" class="btn btn-sm btn-wallet" onclick="openEditProfileModal()" title="แก้ไขชื่อ หน่วยงาน และรหัสผ่าน">
             ✏️ แก้ไข
-          </button>
-          <button id="btnSyncMenu" class="btn btn-sm btn-wallet" onclick="openSyncModal()" title="ซิงค์ข้อมูลระหว่างเครื่อง (บทเรียน ใบประกาศ การเรียนรู้ สมาชิก)">
-            🔄 ซิงค์เครื่อง
           </button>
 
           <!-- Dynamic Role Action Buttons -->
@@ -458,6 +449,26 @@
                 <div class="stat-label">เวลารวม</div>
               </div>
             </div>
+
+            <!-- ความคิดเห็นจากผู้เรียน (สุ่ม 10 คน + ค้นหา + แจ้งผู้จัดการลบ) -->
+            <div style="margin-top:1.5rem; padding-top:1.25rem; border-top:1px solid var(--border);">
+              <div class="section-head-row" style="margin-bottom:0.85rem;">
+                <div>
+                  <h3 class="section-title" style="font-size:1.05rem;">💬 ความคิดเห็นจากผู้เรียน (สุ่ม 10 รายการ)</h3>
+                  <p class="section-desc">แสดงความคิดเห็นแบบสุ่ม 10 รายการ หรือค้นหาจากทุกบทเรียน และแจ้งผู้จัดการหากพบข้อความไม่เหมาะสม</p>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline" onclick="rerollCreatorComments()">🎲 สุ่มใหม่ 10 รายการ</button>
+              </div>
+              <div class="search-input-wrap" style="margin-bottom:0.9rem;">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="creatorCommentSearchInput" class="search-input"
+                       placeholder="ค้นหาข้อความความคิดเห็น, รหัสบทเรียน (#XXXXX), หรือชื่อบทเรียน..."
+                       oninput="renderCreatorCommentsUI()">
+              </div>
+              <div id="creatorCommentsList" style="display:flex; flex-direction:column; gap:0.65rem;">
+                <!-- Render from JS -->
+              </div>
+            </div>
           </section>
         </div>
       </div>
@@ -484,6 +495,9 @@
             </button>
             <button class="btn btn-sm btn-wallet" onclick="openLifecycleModal()">
               ⏳ อายุขัยบล็อก
+            </button>
+            <button class="btn btn-sm btn-wallet" onclick="openManagerNetworkModal()">
+              🌐 สถานะเครือข่าย
             </button>
             <button class="btn btn-sm btn-primary" onclick="openMemberManagementModal()">
               👥 จัดการสมาชิก
@@ -540,6 +554,11 @@
           <button type="button" id="managerTabBtn_lessonStats" class="portal-tab-btn" onclick="switchPortalTab('manager', 'lessonStats')">
             <span class="portal-tab-icon">📚</span>
             <span>สรุปสถิติแยกตามบทเรียน</span>
+          </button>
+          <button type="button" id="managerTabBtn_reported" class="portal-tab-btn" onclick="switchPortalTab('manager', 'reported')">
+            <span class="portal-tab-icon">🚩</span>
+            <span>แจ้งลบข้อความ</span>
+            <span class="portal-tab-badge hidden" id="managerReportedBadge">0</span>
           </button>
         </div>
 
@@ -607,6 +626,20 @@
               </div>
             </div>
             <div id="managerLessonStatsContainer" style="margin-top: 1.25rem;"></div>
+          </section>
+        </div>
+
+        <!-- Tab 5: แจ้งลบข้อความไม่เหมาะสม -->
+        <div id="managerPanel_reported" class="portal-tab-panel hidden">
+          <section class="card">
+            <div class="section-head-row">
+              <div>
+                <h2 class="section-title">🚩 ความคิดเห็นที่ได้รับแจ้งว่าไม่เหมาะสม</h2>
+                <p class="section-desc">ตรวจสอบความคิดเห็นที่ผู้สร้างบทเรียนส่งเรื่องมา และเลือกลบข้อความหรือยกเลิกการแจ้ง</p>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline" onclick="loadManagerReportedComments()">🔄 รีเฟรช</button>
+            </div>
+            <div id="managerReportedCommentsList" style="margin-top: 1rem; display:flex; flex-direction:column; gap:0.7rem;"></div>
           </section>
         </div>
       </div>
@@ -1438,144 +1471,7 @@
     </div>
   </div>
 
-  <!-- ===== MODAL: เชื่อมต่อและซิงค์ข้อมูลระหว่างเครื่อง ===== -->
-  <div id="syncModal" class="modal-bg hidden" onclick="if(event.target===this)closeSyncModal()">
-    <div class="modal-box" style="max-width:680px; width:95%;">
-      <div class="modal-hdr">
-        <div class="modal-hdr-left">
-          <span class="lesson-badge">🔄 เชื่อมต่อข้ามเครื่อง</span>
-          <h3 class="modal-title">ใช้งานร่วมกันและซิงค์ข้อมูลระหว่างเครื่อง</h3>
-        </div>
-        <button class="modal-close" onclick="closeSyncModal()">✕</button>
-      </div>
-      <div class="modal-body" style="display:flex; flex-direction:column; gap:1rem; max-height:82vh; overflow-y:auto;">
-
-        <!-- สถิติข้อมูลในเครื่องปัจจุบัน -->
-        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.85rem 1rem;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.45rem;">
-            <div style="font-size:0.86rem; font-weight:700; color:var(--primary);">
-              💻 ข้อมูลในเครื่องนี้ (<span id="syncHostnameLabel">-</span>)
-            </div>
-            <span id="syncOnlineCountBadge" style="background:rgba(16,185,129,0.14); color:#059669; border:1px solid rgba(16,185,129,0.35); padding:0.2rem 0.65rem; border-radius:999px; font-size:0.78rem; font-weight:700;">
-              🟢 เชื่อมต่ออยู่ 1 เครื่อง
-            </span>
-          </div>
-          <div id="syncLocalCountsBox" style="display:flex; flex-wrap:wrap; gap:0.5rem; font-size:0.82rem; color:var(--text);">
-            กำลังโหลดข้อมูล...
-          </div>
-        </div>
-
-        <!-- วิธีที่ 1: เปิดผ่าน LAN เดียวกัน + QR Code -->
-        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
-          <div style="font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:0.35rem;">
-            📱 วิธีที่ 1: สแกน QR Code เพื่อเข้าใช้งานเครื่องนี้โดยตรง (Wi-Fi / LAN เดียวกัน)
-          </div>
-          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
-            ใช้มือถือ, iPad หรือคอมพิวเตอร์เครื่องอื่นในวง Wi-Fi เดียวกัน สแกน QR Code หรือเปิดลิงก์ด้านล่างเพื่อใช้งานฐานข้อมูลเดียวกันแบบเรียลไทม์:
-          </div>
-          <div id="syncLanUrlList" style="display:flex; flex-direction:column; gap:0.6rem;"></div>
-        </div>
-
-        <!-- วิธีที่ 2: Auto-Sync ผ่าน Google Apps Script + Google Sheet -->
-        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.35rem;">
-            <div style="font-size:0.9rem; font-weight:700; color:var(--text);">
-              ☁️ วิธีที่ 2: Auto-Sync อัจฉริยะ (LAN/WiFi หลัก + GAS Signaling/Fallback)
-            </div>
-            <button type="button" id="btnCopyGasScript" class="btn btn-sm btn-wallet hidden" onclick="copyGasScriptCode()" title="คัดลอกโค้ดสำหรับนำไปวางใน Google Sheet > Extensions > Apps Script">
-              📋 คัดลอกโค้ด Google Apps Script
-            </button>
-          </div>
-          <div id="syncTransportBanner" style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
-            ระบบจะใช้ <strong>LAN / WiFi / LocalIP</strong> ถ่ายโอนข้อมูลหลักโดยเลือก IP ที่เร็วที่สุดให้อัตโนมัติ และใช้ GAS เป็นช่องทางกลางระบุตำแหน่งเครื่องเท่านั้น (สลับใช้ GAS อัตโนมัติเมื่ออยู่นอกวง LAN)
-          </div>
-
-          <div style="display:flex; flex-direction:column; gap:0.55rem;">
-            <div id="syncGasUrlGroup" class="hidden">
-              <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
-                🔗 URL ของ Google Apps Script Signaling:
-              </label>
-              <input type="text" id="syncPeerUrlInput" class="form-input" style="width:100%;" placeholder="https://script.google.com/macros/s/.../exec">
-            </div>
-
-            <div id="syncGasStatusBadge" style="display:flex; align-items:center; gap:0.5rem; font-size:0.8rem; font-weight:600; color:var(--text); background:var(--bg); border:1px solid var(--border); padding:0.45rem 0.7rem; border-radius:8px;">
-              <span id="syncGasStatusDot" style="display:inline-block; width:11px; height:11px; border-radius:50%; background:#f59e0b; box-shadow:0 0 6px rgba(245,158,11,0.55); flex-shrink:0;"></span>
-              <span id="syncGasStatusLabel">สถานะการเชื่อมต่อ GAS: กำลังตรวจสอบ...</span>
-            </div>
-
-            <div style="display:grid; grid-template-columns:1fr; gap:0.45rem;">
-              <div>
-                <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
-                  ⚡ การเลือก IP เชื่อมต่อ Master:
-                </label>
-                <select id="syncPreferredIpSelect" class="form-input" style="width:100%;">
-                  <option value="auto">⚡ อัตโนมัติ (ทดสอบและเลือก IP ที่เร็วที่สุด)</option>
-                </select>
-              </div>
-              <div id="syncMasterOverrideGroup" class="hidden">
-                <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
-                  👑 เลือก Master:
-                </label>
-                <select id="syncPreferredMasterSelect" class="form-input" style="width:100%;">
-                  <option value="auto">⚡ อัตโนมัติ (เลือกเครื่องที่เสถียรภาพและประสิทธิภาพสูงสุด)</option>
-                </select>
-              </div>
-            </div>
-
-            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; margin-top:0.15rem;">
-              <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:600; color:var(--text); cursor:pointer;">
-                <input type="checkbox" id="syncAutoEnabledCheckbox" checked style="width:16px; height:16px; accent-color:var(--primary);">
-                ⚡ เปิด Auto-Sync อัตโนมัติ (ทุก 30 วินาที)
-              </label>
-
-              <div style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; color:var(--muted);">
-                <span>ลบเครื่องที่ไม่ออนไลน์เกิน:</span>
-                <input type="number" id="syncTimeoutSecInput" class="form-input" value="180" min="15" max="3600" style="width:75px; padding:0.25rem 0.45rem; text-align:center;">
-                <span>วินาที</span>
-              </div>
-            </div>
-
-            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.25rem;">
-              <button type="button" id="btnPeerSyncSubmit" class="btn btn-primary" style="flex:1;" onclick="submitPeerSync()">
-                🔄 บันทึก & ซิงค์ข้อมูลทันที
-              </button>
-            </div>
-          </div>
-
-          <!-- รายชื่อเครื่องที่กำลังเชื่อมต่ออยู่ -->
-          <div style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px dashed var(--border);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
-              <span style="font-size:0.82rem; font-weight:700; color:var(--text);">🖥️ เครื่องที่เชื่อมต่ออยู่ในระบบตอนนี้:</span>
-              <span id="syncLastSyncLabel" style="font-size:0.75rem; color:var(--muted);">ยังไม่ได้ซิงค์</span>
-            </div>
-            <div id="syncActiveNodesList" style="display:flex; flex-direction:column; gap:0.35rem; font-size:0.8rem;"></div>
-          </div>
-        </div>
-
-        <!-- วิธีที่ 3: ส่งออก / นำเข้าไฟล์ข้อมูล (กรณีอยู่คนละวงแลน หรือส่งผ่าน LINE / Flash Drive) -->
-        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
-          <div style="font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:0.35rem;">
-            📦 วิธีที่ 3: ส่งออก / นำเข้าไฟล์ข้อมูล (ส่งผ่าน LINE หรือ Flash Drive)
-          </div>
-          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.6rem; line-height:1.5;">
-            ใช้เมื่อต้องการสำรองข้อมูล หรือส่งออกข้อมูลทั้งหมดเป็นไฟล์เดียวแล้วนำไปกดนำเข้าที่อีกเครื่อง:
-          </div>
-          <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
-            <button type="button" class="btn btn-sm btn-wallet" onclick="exportSyncSnapshotFile()">
-              ⬇️ ส่งออกไฟล์ข้อมูล
-            </button>
-            <label class="btn btn-sm btn-primary" style="cursor:pointer; margin:0;">
-              ⬆️ นำเข้าไฟล์ข้อมูล
-              <input type="file" id="syncImportFileInput" accept=".json" style="display:none;" onchange="importSyncSnapshotFile(event)">
-            </label>
-          </div>
-        </div>
-
-        <div id="syncResultStatusBox" class="hidden" style="padding:0.75rem 1rem; border-radius:8px; font-size:0.84rem; line-height:1.5;"></div>
-
-      </div>
-    </div>
-  </div>
+  <!-- ===== MODAL: เชื่อมต่อและซิงค์ข้อมูลระหว่างเครื่อง (ย้ายไปรวมใน managerNetworkModal แล้ว) ===== -->
 
   <!-- ===== MODAL: ตัวอย่างก่อนพิมพ์ ===== -->
   <div id="printPreviewModal" class="modal-bg hidden" onclick="if(event.target===this)closePrintPreviewModal()">
@@ -1701,6 +1597,147 @@
           <div style="font-weight:700; font-size:0.88rem; margin-bottom:0.5rem;">📋 รายชื่อผู้ลงนามทั้งหมดในระบบ:</div>
           <div id="signatoriesListContainer" style="display:flex; flex-direction:column; gap:0.5rem;"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MANAGER NETWORK & SYNC STATUS MODAL ===== -->
+  <div id="managerNetworkModal" class="modal-bg hidden" onclick="if(event.target===this)closeManagerNetworkModal()">
+    <div class="modal-box" style="max-width:780px; width:95%;">
+      <div class="modal-hdr">
+        <div class="modal-hdr-left">
+          <span class="lesson-badge">🌐 Network & Sync</span>
+          <h3 class="modal-title">สถานะการเชื่อมต่อระบบ & ซิงค์ข้อมูล</h3>
+        </div>
+        <button class="modal-close" onclick="closeManagerNetworkModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:1rem; max-height:84vh; overflow-y:auto;">
+        <div id="managerNetworkStatusBody">
+          <div style="font-size:0.85rem; color:var(--muted); padding:1rem; text-align:center;">⏳ กำลังตรวจสอบสถานะการเชื่อมต่อ (GAS, Local IP, Public IP, Web)...</div>
+        </div>
+
+        <!-- สถิติข้อมูลในเครื่องปัจจุบัน -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.85rem 1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.45rem;">
+            <div style="font-size:0.86rem; font-weight:700; color:var(--primary);">
+              💻 ข้อมูลในเครื่องนี้ (<span id="syncHostnameLabel">-</span>)
+            </div>
+            <span id="syncOnlineCountBadge" style="background:rgba(16,185,129,0.14); color:#059669; border:1px solid rgba(16,185,129,0.35); padding:0.2rem 0.65rem; border-radius:999px; font-size:0.78rem; font-weight:700;">
+              🟢 เชื่อมต่ออยู่ 1 เครื่อง
+            </span>
+          </div>
+          <div id="syncLocalCountsBox" style="display:flex; flex-wrap:wrap; gap:0.5rem; font-size:0.82rem; color:var(--text);">
+            กำลังโหลดข้อมูล...
+          </div>
+        </div>
+
+        <!-- วิธีที่ 1: เปิดผ่าน LAN เดียวกัน + QR Code -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
+          <div style="font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:0.35rem;">
+            📱 วิธีที่ 1: สแกน QR Code เพื่อเข้าใช้งานเครื่องนี้โดยตรง (Wi-Fi / LAN เดียวกัน)
+          </div>
+          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
+            ใช้มือถือ, iPad หรือคอมพิวเตอร์เครื่องอื่นในวง Wi-Fi เดียวกัน สแกน QR Code หรือเปิดลิงก์ด้านล่างเพื่อใช้งานฐานข้อมูลเดียวกันแบบเรียลไทม์:
+          </div>
+          <div id="syncLanUrlList" style="display:flex; flex-direction:column; gap:0.6rem;"></div>
+        </div>
+
+        <!-- วิธีที่ 2: Auto-Sync ผ่าน Google Apps Script + Google Sheet -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.35rem;">
+            <div style="font-size:0.9rem; font-weight:700; color:var(--text);">
+              ☁️ วิธีที่ 2: Auto-Sync อัจฉริยะ (LAN/WiFi หลัก + GAS Signaling/Fallback)
+            </div>
+            <button type="button" id="btnCopyGasScript" class="btn btn-sm btn-wallet hidden" onclick="copyGasScriptCode()" title="คัดลอกโค้ดสำหรับนำไปวางใน Google Sheet > Extensions > Apps Script">
+              📋 คัดลอกโค้ด Google Apps Script
+            </button>
+          </div>
+          <div id="syncTransportBanner" style="font-size:0.8rem; color:var(--muted); margin-bottom:0.65rem; line-height:1.5;">
+            ระบบจะใช้ <strong>LAN / WiFi / LocalIP</strong> ถ่ายโอนข้อมูลหลักโดยเลือก IP ที่เร็วที่สุดให้อัตโนมัติ และใช้ GAS เป็นช่องทางกลางระบุตำแหน่งเครื่องเท่านั้น (สลับใช้ GAS อัตโนมัติเมื่ออยู่นอกวง LAN)
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:0.55rem;">
+            <div id="syncGasUrlGroup" class="hidden">
+              <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
+                🔗 URL ของ Google Apps Script Signaling:
+              </label>
+              <input type="text" id="syncPeerUrlInput" class="form-input" style="width:100%;" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+
+            <div id="syncGasStatusBadge" style="display:flex; align-items:center; gap:0.5rem; font-size:0.8rem; font-weight:600; color:var(--text); background:var(--bg); border:1px solid var(--border); padding:0.45rem 0.7rem; border-radius:8px;">
+              <span id="syncGasStatusDot" style="display:inline-block; width:11px; height:11px; border-radius:50%; background:#f59e0b; box-shadow:0 0 6px rgba(245,158,11,0.55); flex-shrink:0;"></span>
+              <span id="syncGasStatusLabel">สถานะการเชื่อมต่อ GAS: กำลังตรวจสอบ...</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr; gap:0.45rem;">
+              <div>
+                <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
+                  ⚡ การเลือก IP เชื่อมต่อ Master:
+                </label>
+                <select id="syncPreferredIpSelect" class="form-input" style="width:100%;">
+                  <option value="auto">⚡ อัตโนมัติ (ทดสอบและเลือก IP ที่เร็วที่สุด)</option>
+                </select>
+              </div>
+              <div id="syncMasterOverrideGroup" class="hidden">
+                <label style="font-size:0.78rem; font-weight:600; color:var(--text); display:block; margin-bottom:0.25rem;">
+                  👑 เลือก Master:
+                </label>
+                <select id="syncPreferredMasterSelect" class="form-input" style="width:100%;">
+                  <option value="auto">⚡ อัตโนมัติ (เลือกเครื่องที่เสถียรภาพและประสิทธิภาพสูงสุด)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.6rem; margin-top:0.15rem;">
+              <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:600; color:var(--text); cursor:pointer;">
+                <input type="checkbox" id="syncAutoEnabledCheckbox" checked style="width:16px; height:16px; accent-color:var(--primary);">
+                ⚡ เปิด Auto-Sync อัตโนมัติ (ทุก 30 วินาที)
+              </label>
+
+              <div style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; color:var(--muted);">
+                <span>ลบเครื่องที่ไม่ออนไลน์เกิน:</span>
+                <input type="number" id="syncTimeoutSecInput" class="form-input" value="180" min="15" max="3600" style="width:75px; padding:0.25rem 0.45rem; text-align:center;">
+                <span>วินาที</span>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.25rem;">
+              <button type="button" id="btnPeerSyncSubmit" class="btn btn-primary" style="flex:1;" onclick="submitPeerSync()">
+                🔄 บันทึก & ซิงค์ข้อมูลทันที
+              </button>
+            </div>
+          </div>
+
+          <!-- รายชื่อเครื่องที่กำลังเชื่อมต่ออยู่ -->
+          <div style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px dashed var(--border);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
+              <span style="font-size:0.82rem; font-weight:700; color:var(--text);">🖥️ เครื่องที่เชื่อมต่ออยู่ในระบบตอนนี้:</span>
+              <span id="syncLastSyncLabel" style="font-size:0.75rem; color:var(--muted);">ยังไม่ได้ซิงค์</span>
+            </div>
+            <div id="syncActiveNodesList" style="display:flex; flex-direction:column; gap:0.35rem; font-size:0.8rem;"></div>
+          </div>
+        </div>
+
+        <!-- วิธีที่ 3: ส่งออก / นำเข้าไฟล์ข้อมูล (กรณีอยู่คนละวงแลน หรือส่งผ่าน LINE / Flash Drive) -->
+        <div style="background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:0.9rem 1rem;">
+          <div style="font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:0.35rem;">
+            📦 วิธีที่ 3: ส่งออก / นำเข้าไฟล์ข้อมูล (ส่งผ่าน LINE หรือ Flash Drive)
+          </div>
+          <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.6rem; line-height:1.5;">
+            ใช้เมื่อต้องการสำรองข้อมูล หรือส่งออกข้อมูลทั้งหมดเป็นไฟล์เดียวแล้วนำไปกดนำเข้าที่อีกเครื่อง:
+          </div>
+          <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm btn-wallet" onclick="exportSyncSnapshotFile()">
+              ⬇️ ส่งออกไฟล์ข้อมูล
+            </button>
+            <label class="btn btn-sm btn-primary" style="cursor:pointer; margin:0;">
+              ⬆️ นำเข้าไฟล์ข้อมูล
+              <input type="file" id="syncImportFileInput" accept=".json" style="display:none;" onchange="importSyncSnapshotFile(event)">
+            </label>
+          </div>
+        </div>
+
+        <div id="syncResultStatusBox" class="hidden" style="padding:0.75rem 1rem; border-radius:8px; font-size:0.84rem; line-height:1.5;"></div>
       </div>
     </div>
   </div>

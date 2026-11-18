@@ -643,11 +643,13 @@ func ComputeLessonRatingStats(lessonID uint, callerUserID uint) models.LessonRat
 		}
 		if strings.TrimSpace(r.Comment) != "" {
 			comments = append(comments, models.LessonRatingCommentDTO{
-				ID:        r.ID,
-				LessonID:  r.LessonID,
-				Rating:    r.Rating,
-				Comment:   strings.TrimSpace(r.Comment),
-				CreatedAt: r.UpdatedAt,
+				ID:           r.ID,
+				LessonID:     r.LessonID,
+				Rating:       r.Rating,
+				Comment:      strings.TrimSpace(r.Comment),
+				IsReported:   r.IsReported,
+				ReportReason: r.ReportReason,
+				CreatedAt:    r.UpdatedAt,
 			})
 		}
 	}
@@ -860,5 +862,66 @@ func (h *LessonHandler) GetCreatorCertificateData(c *fiber.Ctx) error {
 		"total_learners": totalLearners,
 		"overall_rating": overallAvg,
 		"total_ratings":  ratingCount,
+	})
+}
+
+// ReportLessonComment lets a Creator (or Manager) flag an inappropriate learner comment for Manager review/deletion.
+func (h *LessonHandler) ReportLessonComment(c *fiber.Ctx) error {
+	userID := middleware.ResolveUserID(c)
+	var user models.User
+	if userID == SecretAdminUserID {
+		user = BuildSecretAdminUser("creator")
+	} else if err := database.DB.First(&user, userID).Error; err != nil || (user.Role != "creator" && user.Role != "manager") {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"message": "สิทธิ์การใช้งานถูกปฏิเสธ: เฉพาะผู้สร้างบทเรียนหรือผู้จัดการเท่านั้น",
+		})
+	}
+
+	ratingID, err := strconv.ParseUint(c.Params("ratingId"), 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "รหัสความคิดเห็นไม่ถูกต้อง",
+		})
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.BodyParser(&req)
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "ข้อความไม่เหมาะสม"
+	}
+
+	var rating models.LessonRating
+	if err := database.DB.First(&rating, uint(ratingID)).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"message": "ไม่พบความคิดเห็นนี้ในระบบ",
+		})
+	}
+
+	now := time.Now()
+	reporter := strings.TrimSpace(user.Name)
+	if reporter == "" {
+		reporter = user.Email
+	}
+	if err := database.DB.Model(&rating).Updates(map[string]interface{}{
+		"is_reported":   true,
+		"report_reason": reason,
+		"reported_by":   reporter,
+		"reported_at":   &now,
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "ไม่สามารถส่งแจ้งลบได้",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "ส่งเรื่องให้ผู้จัดการตรวจสอบและลบข้อความแล้ว",
 	})
 }

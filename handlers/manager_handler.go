@@ -1258,3 +1258,126 @@ func (h *ManagerHandler) GetWardLearnersStats(c *fiber.Ctx) error {
 		"members":       result,
 	})
 }
+
+type ReportedCommentDTO struct {
+	ID           uint       `json:"id"`
+	LessonID     uint       `json:"lesson_id"`
+	LessonTitle  string     `json:"lesson_title"`
+	Rating       int        `json:"rating"`
+	Comment      string     `json:"comment"`
+	ReportReason string     `json:"report_reason"`
+	ReportedBy   string     `json:"reported_by"`
+	ReportedAt   *time.Time `json:"reported_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// ListReportedComments returns all learner comments flagged by creators for manager review.
+func (h *ManagerHandler) ListReportedComments(c *fiber.Ctx) error {
+	if _, ok := requireManagerOrSecretAdmin(c); !ok {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"message": "สิทธิ์การใช้งานถูกปฏิเสธ: เฉพาะผู้จัดการเท่านั้น",
+		})
+	}
+
+	var ratings []models.LessonRating
+	database.DB.Where("is_reported = ? AND comment != ''", true).Order("reported_at desc, updated_at desc").Find(&ratings)
+
+	var lessons []models.Lesson
+	database.DB.Find(&lessons)
+	lessonTitleMap := make(map[uint]string, len(lessons))
+	for _, l := range lessons {
+		lessonTitleMap[l.ID] = l.Title
+	}
+
+	out := make([]ReportedCommentDTO, 0, len(ratings))
+	for _, r := range ratings {
+		out = append(out, ReportedCommentDTO{
+			ID:           r.ID,
+			LessonID:     r.LessonID,
+			LessonTitle:  lessonTitleMap[r.LessonID],
+			Rating:       r.Rating,
+			Comment:      r.Comment,
+			ReportReason: r.ReportReason,
+			ReportedBy:   r.ReportedBy,
+			ReportedAt:   r.ReportedAt,
+			CreatedAt:    r.UpdatedAt,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success":  true,
+		"comments": out,
+	})
+}
+
+// DeleteReportedComment clears an inappropriate learner comment while keeping the anonymous star rating.
+func (h *ManagerHandler) DeleteReportedComment(c *fiber.Ctx) error {
+	if _, ok := requireManagerOrSecretAdmin(c); !ok {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"message": "สิทธิ์การใช้งานถูกปฏิเสธ: เฉพาะผู้จัดการเท่านั้น",
+		})
+	}
+
+	ratingID, err := strconv.ParseUint(c.Params("ratingId"), 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "รหัสความคิดเห็นไม่ถูกต้อง",
+		})
+	}
+
+	if err := database.DB.Model(&models.LessonRating{}).Where("id = ?", uint(ratingID)).Updates(map[string]interface{}{
+		"comment":       "",
+		"is_reported":   false,
+		"report_reason": "",
+		"reported_by":   "",
+		"reported_at":   nil,
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "ไม่สามารถลบข้อความได้",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "ลบข้อความไม่เหมาะสมเรียบร้อยแล้ว",
+	})
+}
+
+// DismissReportedComment clears the report flag while keeping the comment.
+func (h *ManagerHandler) DismissReportedComment(c *fiber.Ctx) error {
+	if _, ok := requireManagerOrSecretAdmin(c); !ok {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"message": "สิทธิ์การใช้งานถูกปฏิเสธ: เฉพาะผู้จัดการเท่านั้น",
+		})
+	}
+
+	ratingID, err := strconv.ParseUint(c.Params("ratingId"), 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "รหัสความคิดเห็นไม่ถูกต้อง",
+		})
+	}
+
+	if err := database.DB.Model(&models.LessonRating{}).Where("id = ?", uint(ratingID)).Updates(map[string]interface{}{
+		"is_reported":   false,
+		"report_reason": "",
+		"reported_by":   "",
+		"reported_at":   nil,
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "ไม่สามารถยกเลิกการแจ้งได้",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "ยกเลิกการแจ้งลบแล้ว",
+	})
+}

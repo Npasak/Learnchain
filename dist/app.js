@@ -595,7 +595,7 @@ function switchPortalTab(portal, tabKey) {
   const tabsByPortal = {
     learner: ['assigned', 'all', 'stats'],
     creator: ['lessons', 'stats'],
-    manager: ['assign', 'stats', 'wardStats', 'lessonStats']
+    manager: ['assign', 'stats', 'wardStats', 'lessonStats', 'reported']
   };
   const keys = tabsByPortal[portal] || [];
   keys.forEach(k => {
@@ -631,6 +631,7 @@ function toggleShowAllAssignedLessons() {
 function toggleShowAllCreatorLessons() {
   showAllCreatorLessons = !showAllCreatorLessons;
   renderCreatorLessonsUI();
+  rerollCreatorComments();
 }
 
 function toggleShowAllManagerLessons() {
@@ -644,21 +645,25 @@ function toggleShowAllManagerLessonStats() {
 }
 
 function assignSequentialLessonNums(list) {
-  (list || []).forEach((l, idx) => {
-    l._displayNum = idx + 1;
-  });
   return list || [];
+}
+
+function computeStableLessonCode(title) {
+  const clean = String(title || '').trim();
+  if (!clean) return '';
+  const bytes = new TextEncoder().encode(clean);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i];
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return String(10000 + (h % 90000));
 }
 
 function getLessonDisplayNum(l) {
   if (!l) return '';
-  if (l._displayNum > 0) return l._displayNum;
-  const lid = l.lesson_id || l.id;
-  if (lid && typeof allManagerLessons !== 'undefined' && Array.isArray(allManagerLessons)) {
-    const m = allManagerLessons.find(x => x.lesson_id === lid);
-    if (m && m._displayNum > 0) return m._displayNum;
-  }
-  return l.sort_order > 0 ? l.sort_order : (lid || '');
+  const code = computeStableLessonCode(l.title || l.lesson_title || '');
+  return code || String(l.lesson_id || l.id || '');
 }
 
 function matchesLessonQuery(l, query) {
@@ -666,7 +671,7 @@ function matchesLessonQuery(l, query) {
   const num = getLessonDisplayNum(l);
   const title = (l.title || l.lesson_title || '').toLowerCase();
   const summary = (l.summary || l.description || l.course_title || '').toLowerCase();
-  const orderText = `บทที่ ${num} #${num} ${num}`.toLowerCase();
+  const orderText = `#${num} ${num}`.toLowerCase();
   return title.includes(query) || summary.includes(query) || orderText.includes(query);
 }
 
@@ -801,7 +806,7 @@ function createLearnerLessonCard(l, isAssignedSection) {
     <div class="lesson-item">
       <div class="lesson-thumb-wrap">
         <img class="lesson-thumb" src="${thumb}" alt="${escapeHtml(l.title)}" loading="lazy">
-        <div class="lesson-order">${getLessonDisplayNum(l)}</div>
+        <div class="lesson-order">#${getLessonDisplayNum(l)}</div>
       </div>
       <div class="lesson-info">
         <div class="lesson-name">${escapeHtml(l.title)}</div>
@@ -1159,6 +1164,7 @@ async function loadCreatorDashboard() {
   set('creatorTotalDuration', `${totalMin} นาที`);
 
   renderCreatorLessonsUI();
+  rerollCreatorComments();
 }
 
 function renderCreatorLessonsUI() {
@@ -1194,7 +1200,7 @@ function renderCreatorLessonsUI() {
       <div class="lesson-item" onclick="openLessonRatingsModal(${l.id}, '${escapeHtml(l.title)}')" style="cursor:pointer; ${isHidden ? 'opacity:0.75; border-color:rgba(239,68,68,0.3);' : ''}" title="คลิกที่การ์ดเพื่อดูสถิติคะแนน 1-5 ดาว">
         <div class="lesson-thumb-wrap">
           <img class="lesson-thumb" src="${thumb}" alt="${escapeHtml(l.title)}" loading="lazy">
-          <div class="lesson-order">${getLessonDisplayNum(l)}</div>
+          <div class="lesson-order">#${getLessonDisplayNum(l)}</div>
         </div>
         <div class="lesson-info">
           <div class="lesson-name">${escapeHtml(l.title)}</div>
@@ -1217,6 +1223,118 @@ function renderCreatorLessonsUI() {
       </div>
     `;
   }).join('') + creatorMoreBtn;
+}
+
+let creatorRandomCommentIDs = [];
+
+function collectAllCreatorComments() {
+  const out = [];
+  (allCreatorLessons || []).forEach(l => {
+    const code = getLessonDisplayNum(l);
+    const comments = (l.rating_stats && Array.isArray(l.rating_stats.comments)) ? l.rating_stats.comments : [];
+    comments.forEach(c => {
+      if (c && String(c.comment || '').trim() !== '') {
+        out.push({
+          ...c,
+          lesson_id: l.id,
+          lesson_title: l.title || '',
+          lesson_code: code
+        });
+      }
+    });
+  });
+  return out;
+}
+
+function rerollCreatorComments() {
+  const all = collectAllCreatorComments();
+  const shuffled = all.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  creatorRandomCommentIDs = shuffled.slice(0, 10).map(c => c.id);
+  renderCreatorCommentsUI();
+}
+
+function renderCreatorCommentsUI() {
+  const listEl = document.getElementById('creatorCommentsList');
+  if (!listEl) return;
+
+  const all = collectAllCreatorComments();
+  if (all.length === 0) {
+    listEl.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--muted); border:1px dashed var(--border); border-radius:var(--r);">ยังไม่มีความคิดเห็นจากผู้เรียนในขณะนี้</div>`;
+    return;
+  }
+
+  const query = (document.getElementById('creatorCommentSearchInput')?.value || '').toLowerCase().trim();
+  let items = [];
+  if (query) {
+    items = all.filter(c => {
+      const codeStr = `#${c.lesson_code} ${c.lesson_code}`.toLowerCase();
+      return (c.comment || '').toLowerCase().includes(query) ||
+             (c.lesson_title || '').toLowerCase().includes(query) ||
+             codeStr.includes(query);
+    });
+  } else {
+    const idSet = new Set(creatorRandomCommentIDs);
+    items = all.filter(c => idSet.has(c.id));
+    if (items.length === 0) {
+      items = all.slice(0, 10);
+    }
+  }
+
+  if (items.length === 0) {
+    listEl.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--muted);">ไม่พบความคิดเห็นที่ตรงกับคำค้นหา</div>`;
+    return;
+  }
+
+  listEl.innerHTML = items.map(c => {
+    const stars = '⭐'.repeat(Math.max(1, Math.min(5, c.rating || 5)));
+    const dateStr = c.created_at ? new Date(c.created_at).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+    const actionHTML = c.is_reported
+      ? `<span class="badge badge-pend" style="font-size:0.74rem;">⏳ ส่งให้ผู้จัดการตรวจสอบแล้ว</span>`
+      : `<button type="button" class="btn btn-sm" style="background:rgba(239,68,68,0.12); color:var(--danger); border:1px solid rgba(239,68,68,0.35);" onclick="reportCommentToManager(${c.id})">🚩 แจ้งผู้จัดการลบ</button>`;
+
+    return `
+      <div style="background:var(--bg); border:1px solid var(--border); border-radius:var(--r); padding:0.85rem 1rem; display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.65rem;">
+        <div style="flex:1; min-width:240px;">
+          <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.3rem;">
+            <span class="badge" style="background:rgba(14,165,233,0.12); color:var(--primary); border:1px solid rgba(14,165,233,0.3); font-size:0.72rem;">#${escapeHtml(String(c.lesson_code))}</span>
+            <strong style="font-size:0.86rem; color:var(--text);">${escapeHtml(c.lesson_title)}</strong>
+            <span style="font-size:0.78rem;">${stars}</span>
+            ${dateStr ? `<span style="font-size:0.73rem; color:var(--muted);">• ${escapeHtml(dateStr)}</span>` : ''}
+          </div>
+          <div style="font-size:0.9rem; color:var(--text); line-height:1.5;">"${escapeHtml(c.comment)}"</div>
+        </div>
+        <div>
+          ${actionHTML}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function reportCommentToManager(ratingId) {
+  const reason = prompt('ระบุเหตุผลที่ต้องการส่งให้ผู้จัดการลบข้อความนี้:', 'ข้อความไม่เหมาะสม / ไม่สุภาพ');
+  if (reason === null) return;
+  const res = await fetchJSON(`/api/lessons/ratings/${ratingId}/report`, 'POST', { reason: reason.trim() || 'ข้อความไม่เหมาะสม' });
+  if (res && res.success) {
+    (allCreatorLessons || []).forEach(l => {
+      const comments = l.rating_stats && l.rating_stats.comments;
+      if (Array.isArray(comments)) {
+        const hit = comments.find(x => x.id === ratingId);
+        if (hit) {
+          hit.is_reported = true;
+          hit.report_reason = reason.trim() || 'ข้อความไม่เหมาะสม';
+        }
+      }
+    });
+    renderCreatorCommentsUI();
+    alert('✅ ส่งเรื่องให้ผู้จัดการตรวจสอบและลบข้อความเรียบร้อยแล้ว');
+  } else {
+    alert('❌ ' + (res ? res.message : 'ไม่สามารถส่งแจ้งลบได้'));
+  }
 }
 
 // ─── Creator Actions ───
@@ -1401,6 +1519,174 @@ async function loadManagerDashboard() {
 
   renderManagerUI();
   renderAddManagerModalUI();
+  loadManagerReportedComments();
+}
+
+function openManagerNetworkModal() {
+  const modal = document.getElementById('managerNetworkModal');
+  if (modal) modal.classList.remove('hidden');
+  const statusBox = document.getElementById('syncResultStatusBox');
+  if (statusBox) statusBox.classList.add('hidden');
+  loadManagerNetworkStatus();
+  if (typeof loadSyncInfo === 'function') {
+    loadSyncInfo(true);
+  }
+  if (syncModalPollTimer) clearInterval(syncModalPollTimer);
+  syncModalPollTimer = setInterval(() => {
+    const m = document.getElementById('managerNetworkModal');
+    if (m && !m.classList.contains('hidden')) {
+      if (typeof loadSyncInfo === 'function') loadSyncInfo(false);
+    }
+  }, 5000);
+}
+
+function closeManagerNetworkModal() {
+  const modal = document.getElementById('managerNetworkModal');
+  if (modal) modal.classList.add('hidden');
+  if (syncModalPollTimer) {
+    clearInterval(syncModalPollTimer);
+    syncModalPollTimer = null;
+  }
+}
+
+async function loadManagerNetworkStatus() {
+  const bar = document.getElementById('managerNetworkStatusBody');
+  if (!bar) return;
+  const info = await fetchJSON('/api/sync/info');
+  if (!info || !info.success) {
+    bar.innerHTML = `<div style="font-size:0.82rem; color:var(--danger);">⚠️ ไม่สามารถดึงสถานะเครือข่ายได้</div>`;
+    return;
+  }
+
+  const gasOk = info.gas_status === 'connected';
+  const gasBadge = gasOk
+    ? `<span style="color:#10b981;">🟢 ปกติ</span>`
+    : (info.gas_status === 'error' ? `<span style="color:#ef4444;">🔴 ขัดข้อง</span>` : `<span style="color:#f59e0b;">🟡 รอตรวจสอบ</span>`);
+
+  const webBadge = info.web_online
+    ? `<span style="color:#10b981;">🟢 ออนไลน์ (${info.web_latency_ms || 0}ms)</span>`
+    : `<span style="color:#ef4444;">🔴 ออฟไลน์ / ถูกบล็อก</span>`;
+
+  const localURL = info.primary_lan_url || ((info.port && info.port !== '80') ? `http://localhost:${info.port}` : 'http://localhost');
+  const allLocalIPs = (info.lan_ips && info.lan_ips.length > 0) ? info.lan_ips.join(', ') : '127.0.0.1';
+  const pubIP = info.public_ip ? escapeHtml(info.public_ip) : '<span style="color:var(--muted);">ไม่พบ (ออฟไลน์)</span>';
+  const roleLabel = info.is_self_master ? '👑 Master (เครื่องหลัก)' : '🔗 Peer (เครื่องลูก)';
+  const onlineNodes = info.active_nodes || [];
+  const nodeTags = onlineNodes.map(n =>
+    `<span class="badge ${n.is_master ? 'badge-ok' : ''}" style="font-size:0.7rem;">${n.is_master ? '👑' : '💻'} ${escapeHtml(n.hostname || n.node_id)} (${escapeHtml(n.lan_url || '-')})</span>`
+  ).join(' ');
+
+  bar.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.55rem;">
+      <div style="font-size:0.85rem; font-weight:700; color:var(--text);">🌐 สถานะการเชื่อมต่อระบบ & ซิงค์ข้อมูล <span class="badge" style="font-size:0.7rem; margin-left:0.25rem;">${escapeHtml(info.app_version || '')}</span></div>
+      <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+        <button type="button" class="btn btn-sm btn-outline" onclick="copySyncLanUrl('${escapeHtml(localURL)}')">📋 คัดลอกลิงก์ LAN</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="loadManagerNetworkStatus()">🔄 รีเฟรชสถานะ</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="triggerManagerSyncNow()">⚡ ซิงค์ทันที</button>
+      </div>
+    </div>
+    <div class="mgr-net-grid">
+      <div class="mgr-net-pill">
+        <span class="mgr-net-lbl">☁️ GAS (Google Apps Script)</span>
+        <span class="mgr-net-val">${gasBadge} <span style="font-weight:500; font-size:0.74rem; color:var(--muted);">${escapeHtml(info.gas_status_text || '')}</span></span>
+      </div>
+      <div class="mgr-net-pill">
+        <span class="mgr-net-lbl">🏠 Local IP (พอร์ต ${escapeHtml(info.port || '80')})</span>
+        <span class="mgr-net-val">${escapeHtml(allLocalIPs)}</span>
+      </div>
+      <div class="mgr-net-pill">
+        <span class="mgr-net-lbl">🌍 Public IP</span>
+        <span class="mgr-net-val">${pubIP}</span>
+      </div>
+      <div class="mgr-net-pill">
+        <span class="mgr-net-lbl">🌐 Web / Internet</span>
+        <span class="mgr-net-val">${webBadge}</span>
+      </div>
+      <div class="mgr-net-pill">
+        <span class="mgr-net-lbl">🖥️ บทบาท & ช่องทางซิงค์</span>
+        <span class="mgr-net-val">${roleLabel} <span style="font-weight:500; font-size:0.74rem; color:var(--muted);">• ${escapeHtml(info.sync_transport || '-')}</span></span>
+      </div>
+      <div class="mgr-net-pill">
+        <span class="mgr-net-lbl">🔄 ออนไลน์ & ซิงค์ล่าสุด</span>
+        <span class="mgr-net-val">💻 ${info.online_count || 0} เครื่อง • ${escapeHtml(info.last_sync_at || '-')} <span style="font-weight:500; font-size:0.73rem; color:var(--muted);">(✓${info.sync_success_count || 0} / ✕${info.sync_fail_count || 0})</span></span>
+      </div>
+    </div>
+  `;
+}
+
+async function triggerManagerSyncNow() {
+  const res = await fetchJSON('/api/sync/auto-now', 'POST');
+  await loadManagerNetworkStatus();
+  if (res && res.success) {
+    loadManagerDashboard();
+  } else if (res && res.error) {
+    alert('⚠️ ' + res.error);
+  }
+}
+
+async function loadManagerReportedComments() {
+  const listEl = document.getElementById('managerReportedCommentsList');
+  const badgeEl = document.getElementById('managerReportedBadge');
+  const res = await fetchJSON('/api/manager/reported-comments');
+  if (!res || !res.success) return;
+
+  const items = res.comments || [];
+  if (badgeEl) {
+    badgeEl.innerText = String(items.length);
+    badgeEl.classList.toggle('hidden', items.length === 0);
+  }
+  if (!listEl) return;
+
+  if (items.length === 0) {
+    listEl.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--muted); border:1px dashed var(--border); border-radius:var(--r);">✅ ยังไม่มีข้อความที่ถูกแจ้งว่าไม่เหมาะสม</div>`;
+    return;
+  }
+
+  listEl.innerHTML = items.map(c => {
+    const code = computeStableLessonCode(c.lesson_title || '');
+    const stars = '⭐'.repeat(Math.max(1, Math.min(5, c.rating || 5)));
+    const dateStr = c.reported_at ? new Date(c.reported_at).toLocaleString('th-TH') : '';
+    return `
+      <div style="background:var(--bg); border:1px solid rgba(239,68,68,0.35); border-left:4px solid var(--danger); border-radius:var(--r); padding:0.9rem 1rem; display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.75rem;">
+        <div style="flex:1; min-width:240px;">
+          <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:0.35rem;">
+            <span class="badge" style="background:rgba(14,165,233,0.12); color:var(--primary); border:1px solid rgba(14,165,233,0.3);">#${escapeHtml(code || String(c.lesson_id))}</span>
+            <strong style="font-size:0.9rem; color:var(--text);">${escapeHtml(c.lesson_title || 'บทเรียน')}</strong>
+            <span style="font-size:0.8rem;">${stars}</span>
+          </div>
+          <div style="font-size:0.92rem; color:var(--text); background:var(--card); padding:0.55rem 0.75rem; border-radius:8px; border:1px solid var(--border); margin-bottom:0.4rem;">
+            "${escapeHtml(c.comment)}"
+          </div>
+          <div style="font-size:0.76rem; color:var(--muted);">
+            🚩 เหตุผล: <strong style="color:var(--danger);">${escapeHtml(c.report_reason || 'ข้อความไม่เหมาะสม')}</strong> • แจ้งโดย: ${escapeHtml(c.reported_by || 'ผู้สร้างบทเรียน')} ${dateStr ? `• ${escapeHtml(dateStr)}` : ''}
+          </div>
+        </div>
+        <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm" style="background:rgba(239,68,68,0.14); color:var(--danger); border:1px solid rgba(239,68,68,0.4);" onclick="deleteReportedComment(${c.id})">🗑️ ลบข้อความ</button>
+          <button type="button" class="btn btn-sm btn-outline" onclick="dismissReportedComment(${c.id})">✅ ปกติ / ยกเลิกแจ้ง</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function deleteReportedComment(ratingId) {
+  if (!confirm('ยืนยันการลบข้อความไม่เหมาะสมนี้ออกจากระบบใช่หรือไม่?')) return;
+  const res = await fetchJSON(`/api/manager/reported-comments/${ratingId}`, 'DELETE');
+  if (res && res.success) {
+    loadManagerReportedComments();
+  } else {
+    alert('❌ ' + (res ? res.message : 'ไม่สามารถลบข้อความได้'));
+  }
+}
+
+async function dismissReportedComment(ratingId) {
+  const res = await fetchJSON(`/api/manager/reported-comments/${ratingId}/dismiss`, 'POST');
+  if (res && res.success) {
+    loadManagerReportedComments();
+  } else {
+    alert('❌ ' + (res ? res.message : 'ไม่สามารถยกเลิกการแจ้งได้'));
+  }
 }
 
 function openAddManagerModal() {
@@ -1738,10 +2024,10 @@ function buildLessonComparisonChartSVG(lessons, activeWard) {
     const hPost = Math.max(2, (Math.min(100, m.postPct) / 100) * plotH);
     const hScore = Math.max(2, (Math.min(100, m.avgScore) / 100) * plotH);
     const num = getLessonDisplayNum(l);
-    const shortTitle = `บทที่ ${num}`;
+    const shortTitle = `#${num}`;
     return `
       <g onclick="openLessonLearnersModal(${l.lesson_id}, '${escapeHtml(l.lesson_title)}')" style="cursor:pointer;">
-        <title>บทที่ ${num} ${escapeHtml(l.lesson_title)} | ก่อนเรียน: ${m.prePct.toFixed(1)}% | หลังเรียน: ${m.postPct.toFixed(1)}% | คะแนนเฉลี่ย: ${m.avgScore.toFixed(1)}%</title>
+        <title>#${num} ${escapeHtml(l.lesson_title)} | ก่อนเรียน: ${m.prePct.toFixed(1)}% | หลังเรียน: ${m.postPct.toFixed(1)}% | คะแนนเฉลี่ย: ${m.avgScore.toFixed(1)}%</title>
         <rect x="${cx - barW * 1.5 - 2}" y="${padT + plotH - hPre}" width="${barW}" height="${hPre}" rx="3" fill="#818cf8" class="svg-bar-anim" />
         <rect x="${cx - barW * 0.5}" y="${padT + plotH - hPost}" width="${barW}" height="${hPost}" rx="3" fill="#10b981" class="svg-bar-anim" />
         <rect x="${cx + barW * 0.5 + 2}" y="${padT + plotH - hScore}" width="${barW}" height="${hScore}" rx="3" fill="#f59e0b" class="svg-bar-anim" />
@@ -1833,7 +2119,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
         <div class="manager-lesson-card">
           <div class="manager-lesson-header">
             <div>
-              <h3 style="font-size:1.05rem; color:var(--text); margin-bottom:0.25rem"><span class="badge" style="background:rgba(14,165,233,0.12); color:var(--primary); border:1px solid rgba(14,165,233,0.3); margin-right:0.35rem;">บทที่ ${getLessonDisplayNum(l)}</span>${escapeHtml(l.lesson_title)}</h3>
+              <h3 style="font-size:1.05rem; color:var(--text); margin-bottom:0.25rem"><span class="badge" style="background:rgba(14,165,233,0.12); color:var(--primary); border:1px solid rgba(14,165,233,0.3); margin-right:0.35rem;">#${getLessonDisplayNum(l)}</span>${escapeHtml(l.lesson_title)}</h3>
               <div style="font-size:0.8rem; color:var(--muted); line-height:1.55;">
                 <div>ผู้สร้าง: ${escapeHtml(l.creator_name)} • เปิดให้เรียนถึงวันที่: ${escapeHtml(l.open_period || 'เปิดตลอดเวลา')}</div>
               </div>
@@ -1980,7 +2266,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
       <div class="mgr-graph-card" style="cursor:pointer; transition:transform 0.15s ease, border-color 0.15s ease;" onclick="openLessonLearnersModal(${l.lesson_id}, '${escapeHtml(l.lesson_title)}')" title="คลิกเพื่อโหลดสถิติผู้เรียนแต่ละคน">
         <div class="mgr-graph-hdr">
           <div>
-            <div class="mgr-graph-title">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</div>
+            <div class="mgr-graph-title">#${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</div>
             <div class="mgr-graph-sub">เวลาเรียนขั้นต่ำ: ${reqSec} วินาที ${activeWard ? `• เฉพาะหน่วยงาน: ${escapeHtml(activeWard)}` : ''}</div>
           </div>
           <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
@@ -2064,7 +2350,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
     const avgSec   = m.avgSec;
     return `
       <tr>
-        <td style="font-weight:600;">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</td>
+        <td style="font-weight:600;">#${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</td>
         <td style="text-align:center;">${totalL} คน</td>
         <td style="text-align:center;">${(totalSec/60).toFixed(1)} นาที (${totalSec}s)</td>
         <td style="text-align:center;">${(avgSec/60).toFixed(1)} นาที (${avgSec}s)</td>
@@ -2322,7 +2608,7 @@ function printManagerReport() {
       <div style="border:1px solid #cbd5e1; border-radius:10px; padding:14px 16px; background:#ffffff; page-break-inside:avoid;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid #e2e8f0; padding-bottom:8px; margin-bottom:10px;">
           <div>
-            <div style="font-size:13.5px; font-weight:700; color:#0f172a;">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</div>
+            <div style="font-size:13.5px; font-weight:700; color:#0f172a;">#${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</div>
             <div style="font-size:11px; color:#64748b;">เวลารวม: ${totalMin} นาที (${totalSec}s) | เฉลี่ย: ${avgMin} นาที (${avgSec}s/คน) | สอบผ่าน: ${postCount}/${totalL} คน (${m.postPct.toFixed(1)}%)</div>
           </div>
           <span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap;">ผู้เรียน ${totalL} คน</span>
@@ -2381,7 +2667,7 @@ function printManagerReport() {
     const avgSec   = m.avgSec;
     return `
       <tr style="border-bottom:1px solid #cbd5e1;">
-        <td style="padding:8px 10px; font-weight:600; color:#0f172a;">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</td>
+        <td style="padding:8px 10px; font-weight:600; color:#0f172a;">#${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</td>
         <td style="padding:8px 10px; text-align:center; color:#334155;">${totalL} คน</td>
         <td style="padding:8px 10px; text-align:center; color:#334155;">${(totalSec/60).toFixed(1)} นาที (${totalSec}s)</td>
         <td style="padding:8px 10px; text-align:center; color:#334155;">${(avgSec/60).toFixed(1)} นาที (${avgSec}s)</td>
@@ -2521,7 +2807,7 @@ async function openLesson(lessonId) {
   currentLesson = data.lesson;
   const progress = data.progress || {};
 
-  set('modalBadge',   `บทที่ ${getLessonDisplayNum(currentLesson)}`);
+  set('modalBadge',   `#${getLessonDisplayNum(currentLesson)}`);
   set('modalTitle',   currentLesson.title);
   set('modalSummary', currentLesson.summary || currentLesson.description || '');
 
@@ -3188,30 +3474,11 @@ async function fetchJSON(url, method = 'GET', body = null) {
 let syncModalPollTimer = null;
 
 async function openSyncModal() {
-  const modal = document.getElementById('syncModal');
-  if (modal) modal.classList.remove('hidden');
-
-  const statusBox = document.getElementById('syncResultStatusBox');
-  if (statusBox) statusBox.classList.add('hidden');
-
-  await loadSyncInfo(true);
-
-  if (syncModalPollTimer) clearInterval(syncModalPollTimer);
-  syncModalPollTimer = setInterval(() => {
-    const m = document.getElementById('syncModal');
-    if (m && !m.classList.contains('hidden')) {
-      loadSyncInfo(false);
-    }
-  }, 5000);
+  openManagerNetworkModal();
 }
 
 function closeSyncModal() {
-  const modal = document.getElementById('syncModal');
-  if (modal) modal.classList.add('hidden');
-  if (syncModalPollTimer) {
-    clearInterval(syncModalPollTimer);
-    syncModalPollTimer = null;
-  }
+  closeManagerNetworkModal();
 }
 
 async function loadSyncInfo(populateInputs = false) {
@@ -3358,20 +3625,32 @@ async function loadSyncInfo(populateInputs = false) {
     if (nodes.length === 0) {
       nodesListEl.innerHTML = `<div style="color:var(--muted);">ไม่มีข้อมูลเครื่องที่เชื่อมต่อ</div>`;
     } else {
-      nodesListEl.innerHTML = nodes.map(n => `
-        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.4rem; background:var(--bg); border:1px solid var(--border); padding:0.45rem 0.75rem; border-radius:8px;">
-          <div style="display:flex; align-items:center; gap:0.45rem;">
-            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#10b981;"></span>
-            <strong style="color:var(--text);">${escapeHtml(n.hostname || n.node_id)}</strong>
-            ${n.is_master ? '<span style="font-size:0.7rem; background:rgba(245,158,11,0.18); color:#d97706; padding:0.1rem 0.45rem; border-radius:999px; font-weight:700;">👑 Master</span>' : '<span style="font-size:0.7rem; background:rgba(100,116,139,0.15); color:var(--muted); padding:0.1rem 0.45rem; border-radius:999px; font-weight:600;">Peer</span>'}
-            ${n.is_self ? '<span style="font-size:0.7rem; background:rgba(14,165,233,0.15); color:var(--primary); padding:0.1rem 0.45rem; border-radius:999px; font-weight:700;">เครื่องนี้</span>' : ''}
-            <code style="font-size:0.78rem; color:var(--primary);">${escapeHtml(n.lan_url || '')}</code>
+      nodesListEl.innerHTML = nodes.map(n => {
+        const icon = n.is_master ? '👑' : '💻';
+        const statusBadge = n.is_master
+          ? '<span style="font-size:0.7rem; background:rgba(16,185,129,0.14); color:#059669; padding:0.12rem 0.48rem; border-radius:999px; font-weight:700;">🟢 ออนไลน์ • Master</span>'
+          : '<span style="font-size:0.7rem; background:rgba(14,165,233,0.12); color:var(--primary); padding:0.12rem 0.48rem; border-radius:999px; font-weight:700;">🟢 ออนไลน์ • Peer</span>';
+        const verTag = n.app_version || (n.is_self && res.app_version ? res.app_version : '-');
+        const pubTag = n.public_ip || (n.is_self && res.public_ip ? res.public_ip : '-');
+        return `
+          <div style="display:flex; flex-direction:column; gap:0.35rem; background:var(--bg); border:1px solid var(--border); padding:0.6rem 0.8rem; border-radius:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.4rem;">
+              <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
+                <span style="font-size:1.1rem;">${icon}</span>
+                <strong style="color:var(--text); font-size:0.86rem;">${escapeHtml(n.hostname || n.node_id)}</strong>
+                ${statusBadge}
+                ${n.is_self ? '<span style="font-size:0.7rem; background:rgba(99,102,241,0.14); color:#6366f1; padding:0.12rem 0.48rem; border-radius:999px; font-weight:700;">เครื่องนี้</span>' : ''}
+              </div>
+              <span class="badge" style="font-size:0.7rem;">🏷️ ${escapeHtml(verTag)}</span>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:0.75rem; font-size:0.76rem; color:var(--muted);">
+              <span>🏠 Local-IP: <code style="color:var(--primary);">${escapeHtml(n.lan_url || '-')}</code></span>
+              <span>🌍 Public-IP: <strong>${escapeHtml(pubTag)}</strong></span>
+              <span>📊 สมาชิก ${n.users_count || 0} • บทเรียน ${n.lessons_count || 0} • ใบประกาศ ${n.certs_count || 0}${n.latency_ms ? ` • ${n.latency_ms}ms` : ''}</span>
+            </div>
           </div>
-          <div style="font-size:0.74rem; color:var(--muted);">
-            Score: ${n.stability_score ?? 0}${n.latency_ms ? ` (${n.latency_ms}ms)` : ''} | สมาชิก ${n.users_count || 0} | บทเรียน ${n.lessons_count || 0} | ใบประกาศ ${n.certs_count || 0}
-          </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
   }
 }
@@ -4078,7 +4357,7 @@ function renderWardLearnersList() {
           return `
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; padding:0.45rem 0.65rem; background:var(--card); border:1px solid var(--border); border-radius:8px; font-size:0.78rem;">
               <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
-                <strong style="color:var(--text);">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</strong>
+                <strong style="color:var(--text);">#${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</strong>
                 ${l.is_assigned ? '<span class="badge" style="font-size:0.66rem; background:rgba(245,158,11,0.12); color:#d97706;">📌 มอบหมาย</span>' : ''}
               </div>
               <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">

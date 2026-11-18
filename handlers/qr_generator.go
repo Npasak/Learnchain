@@ -279,7 +279,7 @@ func rsComputeEC(data []byte, ecLen int) []byte {
 func (h *SyncHandler) GetQRCodeSVG(c *fiber.Ctx) error {
 	targetURL := strings.TrimSpace(c.Query("url"))
 	if targetURL == "" {
-		targetURL = "http://localhost:8888"
+		targetURL = "http://localhost"
 	}
 	svg := GenerateQRSVG(targetURL)
 	c.Set("Content-Type", "image/svg+xml; charset=utf-8")

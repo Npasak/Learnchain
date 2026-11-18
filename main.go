@@ -135,6 +135,7 @@ func main() {
 	lessonsGroup.Post("/:lessonId/progress", lessonHandler.UpdateProgress)
 	lessonsGroup.Post("/:lessonId/rate", lessonHandler.RateLesson)
 	lessonsGroup.Get("/:lessonId/ratings", lessonHandler.GetLessonRatings)
+	lessonsGroup.Post("/ratings/:ratingId/report", lessonHandler.ReportLessonComment)
 
 	// Quizzes (IsCorrect sanitization & grading)
 	api.Get("/quizzes/:quizId", quizHandler.GetQuiz)
@@ -172,6 +173,9 @@ func main() {
 	managerGroup.Delete("/lifecycle/purge", lifecycleHandler.PurgeExpiredBlocks)
 	managerGroup.Get("/lessons/:lessonId/learners", managerHandler.GetLessonLearnersStats)
 	managerGroup.Get("/wards/:ward/learners", managerHandler.GetWardLearnersStats)
+	managerGroup.Get("/reported-comments", managerHandler.ListReportedComments)
+	managerGroup.Delete("/reported-comments/:ratingId", managerHandler.DeleteReportedComment)
+	managerGroup.Post("/reported-comments/:ratingId/dismiss", managerHandler.DismissReportedComment)
 
 	// God Therunrock Exclusive Vault & Chain Control
 	godGroup := api.Group("/god")
@@ -252,7 +256,7 @@ func main() {
 	})
 
 	// 8. Check if port is already running (avoid black window flash on double-click)
-	url := fmt.Sprintf("http://localhost:%s", cfg.Port)
+	url := handlers.FormatHTTPURL("localhost", cfg.Port)
 	if conn, err := net.DialTimeout("tcp", "127.0.0.1:"+cfg.Port, 350*time.Millisecond); err == nil {
 		_ = conn.Close()
 		log.Printf("⚠️ ระบบ LearnChain กำลังทำงานอยู่แล้วบนพอร์ต %s — กำลังเปิดหน้าเว็บ %s ให้ทันที...", cfg.Port, url)
@@ -276,7 +280,7 @@ func main() {
 	go func() {
 		log.Printf("🚀 Server running at %s", url)
 		for _, ip := range handlers.GetLocalIPs() {
-			log.Printf("🌐 เครื่องอื่นในวง LAN เข้าใช้งานร่วมกันได้ที่: http://%s:%s", ip, cfg.Port)
+			log.Printf("🌐 เครื่องอื่นในวง LAN เข้าใช้งานร่วมกันได้ที่: %s", handlers.FormatHTTPURL(ip, cfg.Port))
 		}
 		if err := app.Listen(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
 			log.Printf("❌ Server error: %v", err)
