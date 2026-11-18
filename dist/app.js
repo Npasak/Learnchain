@@ -574,6 +574,7 @@ let showAllOpenLessons = false;
 let showAllAssignedLessons = false;
 let showAllCreatorLessons = false;
 let showAllManagerLessons = false;
+let showAllManagerLessonStats = false;
 
 function buildLessonsMoreToggleHTML(isExpanded, totalCount, limit, toggleFnName) {
   if (totalCount <= limit) return '';
@@ -594,7 +595,7 @@ function switchPortalTab(portal, tabKey) {
   const tabsByPortal = {
     learner: ['assigned', 'all', 'stats'],
     creator: ['lessons', 'stats'],
-    manager: ['assign', 'stats']
+    manager: ['assign', 'stats', 'wardStats', 'lessonStats']
   };
   const keys = tabsByPortal[portal] || [];
   keys.forEach(k => {
@@ -634,6 +635,11 @@ function toggleShowAllCreatorLessons() {
 
 function toggleShowAllManagerLessons() {
   showAllManagerLessons = !showAllManagerLessons;
+  filterManagerLessons();
+}
+
+function toggleShowAllManagerLessonStats() {
+  showAllManagerLessonStats = !showAllManagerLessonStats;
   filterManagerLessons();
 }
 
@@ -1582,9 +1588,159 @@ function selectManagerWardFilter(ward) {
   }
 }
 
+function buildDonutChartSVG(pct, color, title, sub) {
+  const safePct = Math.max(0, Math.min(100, Number(pct) || 0));
+  const r = 42;
+  const circ = 2 * Math.PI * r; // ~263.89
+  const offset = circ * (1 - safePct / 100);
+  return `
+    <div class="mgr-donut-item">
+      <svg width="116" height="116" viewBox="0 0 116 116">
+        <circle cx="58" cy="58" r="${r}" fill="none" stroke="rgba(148,163,184,0.2)" stroke-width="11" />
+        <circle cx="58" cy="58" r="${r}" fill="none" stroke="${color}" stroke-width="11"
+                stroke-linecap="round" stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"
+                transform="rotate(-90 58 58)" class="svg-donut-progress" />
+        <text x="58" y="56" text-anchor="middle" fill="var(--text)" font-size="18" font-weight="700">${safePct.toFixed(1)}%</text>
+        <text x="58" y="73" text-anchor="middle" fill="var(--muted)" font-size="10">${escapeHtml(sub)}</text>
+      </svg>
+      <div style="font-size:0.82rem; font-weight:600; color:var(--text); text-align:center;">${escapeHtml(title)}</div>
+    </div>
+  `;
+}
+
+function buildWardGroupedBarSVG(wardStats) {
+  if (!wardStats || wardStats.length === 0) return '';
+  const W = 560, H = 220, padL = 36, padB = 34, padT = 18, padR = 12;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const groupW = plotW / wardStats.length;
+  const barW = Math.min(16, (groupW - 10) / 2);
+
+  const gridLines = [0, 25, 50, 75, 100].map(val => {
+    const y = padT + plotH - (val / 100) * plotH;
+    return `
+      <line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(148,163,184,0.2)" stroke-dasharray="3,3" />
+      <text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="var(--muted)" font-size="10">${val}%</text>
+    `;
+  }).join('');
+
+  const bars = wardStats.map((w, idx) => {
+    const cx = padL + idx * groupW + groupW / 2;
+    const hPass = Math.max(2, (Math.min(100, w.passPct) / 100) * plotH);
+    const hScore = Math.max(2, (Math.min(100, w.avgScorePct) / 100) * plotH);
+    const yPass = padT + plotH - hPass;
+    const yScore = padT + plotH - hScore;
+    return `
+      <g onclick="openWardLearnersModal('${escapeHtml(w.ward)}')" style="cursor:pointer;">
+        <title>หน่วยงาน ${escapeHtml(w.ward)}: ผ่าน ${w.passPct.toFixed(1)}% | คะแนนเฉลี่ย ${w.avgScorePct.toFixed(1)}%</title>
+        <rect x="${cx - barW - 2}" y="${yPass}" width="${barW}" height="${hPass}" rx="4" fill="#10b981" class="svg-bar-anim" />
+        <rect x="${cx + 2}" y="${yScore}" width="${barW}" height="${hScore}" rx="4" fill="#f59e0b" class="svg-bar-anim" />
+        <text x="${cx}" y="${H - 10}" text-anchor="middle" fill="var(--text)" font-size="11" font-weight="600">${escapeHtml(w.ward)}</text>
+      </g>
+    `;
+  }).join('');
+
+  return `
+    <div style="display:flex; gap:1rem; font-size:0.76rem; color:var(--muted); margin-bottom:0.45rem; flex-wrap:wrap;">
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#10b981;margin-right:4px;"></span>อัตราสอบผ่านหลังเรียน (%)</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#f59e0b;margin-right:4px;"></span>คะแนนสอบเฉลี่ย (%)</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
+      ${gridLines}
+      ${bars}
+    </svg>
+  `;
+}
+
+function buildWardTimeHorizontalBarSVG(wardStats) {
+  if (!wardStats || wardStats.length === 0) return '';
+  const maxMin = Math.max(1, ...wardStats.map(w => w.totalWatchSec / 60));
+  const rowH = 30;
+  const W = 600, padL = 74, padR = 115, padT = 10;
+  const H = padT + wardStats.length * rowH + 10;
+  const barMaxW = W - padL - padR;
+
+  const rows = wardStats.map((w, idx) => {
+    const mins = w.totalWatchSec / 60;
+    const bw = Math.max(4, (mins / maxMin) * barMaxW);
+    const y = padT + idx * rowH;
+    return `
+      <g onclick="openWardLearnersModal('${escapeHtml(w.ward)}')" style="cursor:pointer;">
+        <text x="${padL - 8}" y="${y + 16}" text-anchor="end" fill="var(--text)" font-size="11.5" font-weight="600">${escapeHtml(w.ward)}</text>
+        <rect x="${padL}" y="${y + 4}" width="${barMaxW}" height="16" rx="6" fill="rgba(148,163,184,0.14)" />
+        <rect x="${padL}" y="${y + 4}" width="${bw.toFixed(1)}" height="16" rx="6" fill="url(#wardTimeGrad)" class="svg-hbar-anim" />
+        <text x="${padL + barMaxW + 8}" y="${y + 16}" fill="var(--muted)" font-size="11">${mins.toFixed(1)} นาที (${w.learnerInstances} รายการ)</text>
+      </g>
+    `;
+  }).join('');
+
+  return `
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
+      <defs>
+        <linearGradient id="wardTimeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#0ea5e9" />
+          <stop offset="100%" stop-color="#6366f1" />
+        </linearGradient>
+      </defs>
+      ${rows}
+    </svg>
+  `;
+}
+
+function buildLessonComparisonChartSVG(lessons, activeWard) {
+  const slice = (lessons || []).slice(0, 8);
+  if (slice.length === 0) return '<p style="color:var(--muted); font-size:0.85rem;">ยังไม่มีข้อมูลบทเรียน</p>';
+  const W = 640, H = 230, padL = 36, padB = 42, padT = 18, padR = 14;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const groupW = plotW / slice.length;
+  const barW = Math.min(13, (groupW - 14) / 3);
+
+  const gridLines = [0, 25, 50, 75, 100].map(val => {
+    const y = padT + plotH - (val / 100) * plotH;
+    return `
+      <line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(148,163,184,0.2)" stroke-dasharray="3,3" />
+      <text x="${padL - 6}" y="${y + 3}" text-anchor="end" fill="var(--muted)" font-size="10">${val}%</text>
+    `;
+  }).join('');
+
+  const bars = slice.map((l, idx) => {
+    const m = computeLessonMetrics(l, activeWard);
+    const cx = padL + idx * groupW + groupW / 2;
+    const hPre = Math.max(2, (Math.min(100, m.prePct) / 100) * plotH);
+    const hPost = Math.max(2, (Math.min(100, m.postPct) / 100) * plotH);
+    const hScore = Math.max(2, (Math.min(100, m.avgScore) / 100) * plotH);
+    const shortTitle = `#${l.lesson_id}`;
+    return `
+      <g onclick="openLessonLearnersModal(${l.lesson_id}, '${escapeHtml(l.lesson_title)}')" style="cursor:pointer;">
+        <title>#${l.lesson_id} ${escapeHtml(l.lesson_title)} | ก่อนเรียน: ${m.prePct.toFixed(1)}% | หลังเรียน: ${m.postPct.toFixed(1)}% | คะแนนเฉลี่ย: ${m.avgScore.toFixed(1)}%</title>
+        <rect x="${cx - barW * 1.5 - 2}" y="${padT + plotH - hPre}" width="${barW}" height="${hPre}" rx="3" fill="#818cf8" class="svg-bar-anim" />
+        <rect x="${cx - barW * 0.5}" y="${padT + plotH - hPost}" width="${barW}" height="${hPost}" rx="3" fill="#10b981" class="svg-bar-anim" />
+        <rect x="${cx + barW * 0.5 + 2}" y="${padT + plotH - hScore}" width="${barW}" height="${hScore}" rx="3" fill="#f59e0b" class="svg-bar-anim" />
+        <text x="${cx}" y="${H - 18}" text-anchor="middle" fill="var(--text)" font-size="10.5" font-weight="600">${shortTitle}</text>
+        <text x="${cx}" y="${H - 5}" text-anchor="middle" fill="var(--muted)" font-size="9">${m.totalL} คน</text>
+      </g>
+    `;
+  }).join('');
+
+  return `
+    <div style="display:flex; gap:1rem; font-size:0.76rem; color:var(--muted); margin-bottom:0.45rem; flex-wrap:wrap;">
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#818cf8;margin-right:4px;"></span>ผ่านก่อนเรียน (%)</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#10b981;margin-right:4px;"></span>ผ่านหลังเรียน (%)</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#f59e0b;margin-right:4px;"></span>คะแนนเฉลี่ย (%)</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto; display:block;">
+      ${gridLines}
+      ${bars}
+    </svg>
+  `;
+}
+
 function renderManagerUI(filterText = undefined, wardFilter = undefined) {
   const container = document.getElementById('managerLessonsList');
-  const reportContainer = document.getElementById('managerReportContainer');
+  const overviewContainer = document.getElementById('managerOverviewContainer');
+  const wardStatsContainer = document.getElementById('managerWardStatsContainer');
+  const lessonStatsContainer = document.getElementById('managerLessonStatsContainer');
   const searchInput = document.getElementById('managerSearchInput');
   const wardSelect = document.getElementById('managerWardFilter');
 
@@ -1769,7 +1925,14 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
     </tr>
   `).join('');
 
-  const lessonGraphCards = filteredLessons.map(l => {
+  const displayedLessonStats = (!query && !showAllManagerLessonStats)
+    ? filteredLessons.slice(0, RECOMMENDED_LESSONS_LIMIT)
+    : filteredLessons;
+  const lessonStatsMoreBtn = !query
+    ? buildLessonsMoreToggleHTML(showAllManagerLessonStats, filteredLessons.length, RECOMMENDED_LESSONS_LIMIT, 'toggleShowAllManagerLessonStats')
+    : '';
+
+  const lessonGraphCards = displayedLessonStats.map(l => {
     const m          = computeLessonMetrics(l, activeWard);
     const totalL     = m.totalL;
     const totalSec   = m.totalSec;
@@ -1884,45 +2047,69 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
     `;
   }).join('');
 
-  reportContainer.innerHTML = `
-    ${activeWard ? `
-      <div style="background:rgba(2,132,199,0.1); border:1px solid var(--primary); border-radius:var(--r); padding:0.65rem 1rem; margin-bottom:1.25rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-        <span style="font-size:0.9rem; font-weight:600; color:var(--primary);">🏥 กำลังแสดงข้อมูลกรองเฉพาะหน่วยงาน: "${escapeHtml(activeWard)}"</span>
-        <button class="btn btn-sm btn-outline" onclick="selectManagerWardFilter('')">แสดงทุกหน่วยงาน</button>
-      </div>
-    ` : ''}
-
-    <!-- Overall KPI Cards -->
-    <div class="stats-grid" style="margin-bottom:1.5rem;">
-      <div class="stat-box">
-        <div class="stat-num" style="color:#38bdf8">${(grandTotalWatchSec/60).toFixed(1)} นาที</div>
-        <div class="stat-label">ระยะเวลาเรียนรวมทุกบท (${Math.round(grandTotalWatchSec)}s)</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-num" style="color:#818cf8">${(overallAvgWatchSec/60).toFixed(1)} นาที</div>
-        <div class="stat-label">ระยะเวลาเรียนเฉลี่ย/คน (${Math.round(overallAvgWatchSec)}s)</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-num" style="color:#34d399">${overallPassPct.toFixed(1)}%</div>
-        <div class="stat-label">อัตราทำแบบทดสอบผ่าน (${grandTotalPostPassed}/${grandTotalLearnerInstances} คน)</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-num" style="color:#facc15">${overallAvgScorePct.toFixed(1)}%</div>
-        <div class="stat-label">คะแนนทำแบบทดสอบเฉลี่ยรวม</div>
-      </div>
+  const activeWardBanner = activeWard ? `
+    <div style="background:rgba(2,132,199,0.1); border:1px solid var(--primary); border-radius:var(--r); padding:0.65rem 1rem; margin-bottom:1.25rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+      <span style="font-size:0.9rem; font-weight:600; color:var(--primary);">🏥 กำลังแสดงข้อมูลกรองเฉพาะหน่วยงาน: "${escapeHtml(activeWard)}"</span>
+      <button class="btn btn-sm btn-outline" onclick="selectManagerWardFilter('')">แสดงทุกหน่วยงาน</button>
     </div>
+  ` : '';
 
-    <!-- Ward Summary Section (หอสงฆ์, สว.11, สว.12, 8A, 8B, 9A, 9B, 9C) -->
-    <div style="background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:1.25rem; margin-bottom:1.5rem;">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:1rem;">
-        <div>
-          <h4 style="margin:0; font-size:1.05rem; color:var(--text);">🏥 สรุปสถิติแยกตามหน่วยงาน (หอสงฆ์, สว.11, สว.12, 8A, 8B, 9A, 9B, 9C)</h4>
-          <p style="margin:0.2rem 0 0; font-size:0.8rem; color:var(--muted);">เปรียบเทียบจำนวนบุคลากร ระยะเวลาเรียน และอัตราการสอบผ่านรายหอผู้ป่วย</p>
+  if (overviewContainer) {
+    const activeWardsCount = wardStats.filter(w => w.learnerInstances > 0).length;
+    const wardCoveragePct = wardStats.length > 0 ? (activeWardsCount / wardStats.length) * 100 : 0;
+    overviewContainer.innerHTML = `
+      ${activeWardBanner}
+      <div class="stats-grid" style="margin-bottom:1.5rem;">
+        <div class="stat-box">
+          <div class="stat-num" style="color:#38bdf8">${(grandTotalWatchSec/60).toFixed(1)} นาที</div>
+          <div class="stat-label">ระยะเวลาเรียนรวมทุกบท (${Math.round(grandTotalWatchSec)}s)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" style="color:#818cf8">${(overallAvgWatchSec/60).toFixed(1)} นาที</div>
+          <div class="stat-label">ระยะเวลาเรียนเฉลี่ย/คน (${Math.round(overallAvgWatchSec)}s)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" style="color:#34d399">${overallPassPct.toFixed(1)}%</div>
+          <div class="stat-label">อัตราทำแบบทดสอบผ่าน (${grandTotalPostPassed}/${grandTotalLearnerInstances} คน)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" style="color:#facc15">${overallAvgScorePct.toFixed(1)}%</div>
+          <div class="stat-label">คะแนนทำแบบทดสอบเฉลี่ยรวม</div>
         </div>
       </div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:0.75rem; margin-bottom:1.1rem;">
+
+      <div class="mgr-charts-grid">
+        <div class="mgr-chart-box">
+          <h4 class="mgr-chart-title">🎯 สัดส่วนผลสัมฤทธิ์ภาพรวม (Donut Chart)</h4>
+          <p class="mgr-chart-sub">อัตราการสอบผ่านหลังเรียน คะแนนเฉลี่ย และความครอบคลุมรายหน่วยงาน</p>
+          <div class="mgr-donut-row">
+            ${buildDonutChartSVG(overallPassPct, '#10b981', 'สอบผ่านหลังเรียน', `${grandTotalPostPassed}/${grandTotalLearnerInstances}`)}
+            ${buildDonutChartSVG(overallAvgScorePct, '#f59e0b', 'คะแนนสอบเฉลี่ย', 'ทุกบทเรียน')}
+            ${buildDonutChartSVG(wardCoveragePct, '#0ea5e9', 'หน่วยงานที่มีผู้เรียน', `${activeWardsCount}/${wardStats.length} หน่วย`)}
+          </div>
+        </div>
+        <div class="mgr-chart-box">
+          <h4 class="mgr-chart-title">📊 เปรียบเทียบอัตราผ่าน & คะแนนเฉลี่ยรายหน่วยงาน</h4>
+          <p class="mgr-chart-sub">คลิกที่แท่งกราฟของแต่ละหน่วยงานเพื่อดูรายชื่อผู้เรียน</p>
+          ${buildWardGroupedBarSVG(wardStats)}
+        </div>
+      </div>
+    `;
+  }
+
+  if (wardStatsContainer) {
+    wardStatsContainer.innerHTML = `
+      ${activeWardBanner}
+      <div class="mgr-chart-box" style="margin-bottom:1.25rem;">
+        <h4 class="mgr-chart-title">⏱️ กราฟเปรียบเทียบเวลาเรียนรวม & จำนวนรายการเข้าเรียนแต่ละหน่วยงาน</h4>
+        <p class="mgr-chart-sub">คลิกที่แถวของหน่วยงานเพื่อเปิดดูสถานะการเรียนรายบุคคล</p>
+        ${buildWardTimeHorizontalBarSVG(wardStats)}
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:0.75rem; margin-bottom:1.25rem;">
         ${wardGraphRows}
       </div>
+
       <div class="report-table-wrap">
         <table class="report-table">
           <thead>
@@ -1942,33 +2129,43 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
           </tbody>
         </table>
       </div>
-    </div>
+    `;
+  }
 
-    <!-- Visual Bar Graphs per Lesson -->
-    <div class="mgr-graphs-grid">
-      ${lessonGraphCards || '<p style="color:var(--muted); text-align:center; padding:2rem;">ยังไม่มีข้อมูลบทเรียน</p>'}
-    </div>
+  if (lessonStatsContainer) {
+    lessonStatsContainer.innerHTML = `
+      ${activeWardBanner}
+      <div class="mgr-chart-box" style="margin-bottom:1.25rem;">
+        <h4 class="mgr-chart-title">📈 กราฟเปรียบเทียบ Pre-Test vs Post-Test vs คะแนนเฉลี่ยรายบทเรียน</h4>
+        <p class="mgr-chart-sub">แสดงผลสูงสุด 8 บทเรียนแรก — คลิกที่แท่งกราฟเพื่อดูรายละเอียดผู้เรียนในบทนั้น</p>
+        ${buildLessonComparisonChartSVG(filteredLessons, activeWard)}
+      </div>
 
-    <!-- Summary Table -->
-    <div class="report-table-wrap" style="margin-top:1.5rem;">
-      <table class="report-table">
-        <thead>
-          <tr>
-            <th>บทเรียน</th>
-            <th style="text-align:center;">ผู้เรียน</th>
-            <th style="text-align:center;">เวลาเรียนรวม</th>
-            <th style="text-align:center;">เวลาเรียนเฉลี่ย</th>
-            <th style="text-align:center;">ผ่านก่อนเรียน (%)</th>
-            <th style="text-align:center;">ผ่านหลังเรียน (%)</th>
-            <th style="text-align:center;">คะแนนเฉลี่ย (%)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${summaryTableRows || '<tr><td colspan="7" style="text-align:center; padding:2rem;">ยังไม่มีข้อมูลสถิติ</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `;
+      <div class="mgr-graphs-grid">
+        ${lessonGraphCards || '<p style="color:var(--muted); text-align:center; padding:2rem;">ยังไม่มีข้อมูลบทเรียน</p>'}
+      </div>
+      ${lessonStatsMoreBtn}
+
+      <div class="report-table-wrap" style="margin-top:1.5rem;">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>บทเรียน</th>
+              <th style="text-align:center;">ผู้เรียน</th>
+              <th style="text-align:center;">เวลาเรียนรวม</th>
+              <th style="text-align:center;">เวลาเรียนเฉลี่ย</th>
+              <th style="text-align:center;">ผ่านก่อนเรียน (%)</th>
+              <th style="text-align:center;">ผ่านหลังเรียน (%)</th>
+              <th style="text-align:center;">คะแนนเฉลี่ย (%)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${summaryTableRows || '<tr><td colspan="7" style="text-align:center; padding:2rem;">ยังไม่มีข้อมูลสถิติ</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
 }
 
 function filterManagerLessons() {

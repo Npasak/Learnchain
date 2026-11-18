@@ -533,6 +533,14 @@
             <span class="portal-tab-icon">📊</span>
             <span>สถิติภาพรวมและรายหน่วยงาน</span>
           </button>
+          <button type="button" id="managerTabBtn_wardStats" class="portal-tab-btn" onclick="switchPortalTab('manager', 'wardStats')">
+            <span class="portal-tab-icon">🏥</span>
+            <span>สรุปสถิติแยกตามหน่วยงาน</span>
+          </button>
+          <button type="button" id="managerTabBtn_lessonStats" class="portal-tab-btn" onclick="switchPortalTab('manager', 'lessonStats')">
+            <span class="portal-tab-icon">📚</span>
+            <span>สรุปสถิติแยกตามบทเรียน</span>
+          </button>
         </div>
 
         <!-- Tab 1: บทเรียนทั้งหมด และการมอบหมายผู้เรียน -->
@@ -551,27 +559,54 @@
           </section>
         </div>
 
-        <!-- Tab 2: สถิติของแต่ละบทเรียน -->
+        <!-- Tab 2: สถิติภาพรวมและรายหน่วยงาน -->
         <div id="managerPanel_stats" class="portal-tab-panel hidden">
           <section class="card">
             <div class="section-head-row">
               <div>
                 <h2 class="section-title">📊 สถิติภาพรวมและรายหน่วยงาน</h2>
-                <p class="section-desc">กราฟและตารางสรุปเวลาเรียนรวม เฉลี่ย และร้อยละการสอบผ่านแยกตามหน่วยงานและรายบทเรียน</p>
+                <p class="section-desc">ตัวชี้วัดภาพรวม กราฟโดนัทอัตราผ่าน/คะแนน และกราฟแท่งเปรียบเทียบรายหน่วยงาน</p>
               </div>
               <div class="section-actions">
-                <button class="btn btn-sm btn-wallet" onclick="printManagerReport()">
-                  🖨️ พิมพ์รายงาน
-                </button>
-                <button class="btn btn-sm btn-primary" onclick="emailManagerReport()">
-                  📧 ส่งเมล
-                </button>
+                <button class="btn btn-sm btn-wallet" onclick="printManagerReport()">🖨️ พิมพ์รายงาน</button>
+                <button class="btn btn-sm btn-primary" onclick="emailManagerReport()">📧 ส่งเมล</button>
               </div>
             </div>
+            <div id="managerOverviewContainer" style="margin-top: 1.25rem;"></div>
+          </section>
+        </div>
 
-            <div id="managerReportContainer" style="margin-top: 1.25rem;">
-              <!-- Render KPI Overview, Visual Graphs & Summary Table from JS -->
+        <!-- Tab 3: สรุปสถิติแยกตามหน่วยงาน -->
+        <div id="managerPanel_wardStats" class="portal-tab-panel hidden">
+          <section class="card">
+            <div class="section-head-row">
+              <div>
+                <h2 class="section-title">🏥 สรุปสถิติแยกตามหน่วยงาน</h2>
+                <p class="section-desc">กราฟเวลาเรียนรวม การ์ดกดดูรายบุคคล และตารางสรุปทั้ง 8 หอผู้ป่วย</p>
+              </div>
+              <div class="section-actions">
+                <button class="btn btn-sm btn-wallet" onclick="printManagerReport()">🖨️ พิมพ์รายงาน</button>
+                <button class="btn btn-sm btn-primary" onclick="emailManagerReport()">📧 ส่งเมล</button>
+              </div>
             </div>
+            <div id="managerWardStatsContainer" style="margin-top: 1.25rem;"></div>
+          </section>
+        </div>
+
+        <!-- Tab 4: สรุปสถิติแยกตามบทเรียน -->
+        <div id="managerPanel_lessonStats" class="portal-tab-panel hidden">
+          <section class="card">
+            <div class="section-head-row">
+              <div>
+                <h2 class="section-title">📚 สรุปสถิติแยกตามบทเรียน</h2>
+                <p class="section-desc">กราฟเปรียบเทียบ Pre-Test vs Post-Test vs คะแนนเฉลี่ย การ์ดรายบทเรียน และตารางสรุป</p>
+              </div>
+              <div class="section-actions">
+                <button class="btn btn-sm btn-wallet" onclick="printManagerReport()">🖨️ พิมพ์รายงาน</button>
+                <button class="btn btn-sm btn-primary" onclick="emailManagerReport()">📧 ส่งเมล</button>
+              </div>
+            </div>
+            <div id="managerLessonStatsContainer" style="margin-top: 1.25rem;"></div>
           </section>
         </div>
       </div>
