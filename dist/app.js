@@ -3648,8 +3648,12 @@ async function loadSyncInfo(populateInputs = false) {
     }).join('');
   }
 
-  // วิธีที่ 2: แสดงรายการเครื่องที่เชื่อมต่ออยู่
+  // วิธีที่ 2: แสดงรายการเครื่องที่เชื่อมต่ออยู่ (อัปเดตตัวนับและรายการ)
+  const nodesCountBadge = document.getElementById('syncActiveNodesCountBadge');
   const nodesListEl = document.getElementById('syncActiveNodesList');
+  if (nodesCountBadge) {
+    nodesCountBadge.textContent = `${(res.active_nodes || []).length} เครื่อง`;
+  }
   if (nodesListEl) {
     const nodes = res.active_nodes || [];
     if (nodes.length === 0) {
@@ -3683,6 +3687,17 @@ async function loadSyncInfo(populateInputs = false) {
       }).join('');
     }
   }
+}
+
+function toggleSyncActiveNodes() {
+  const listEl = document.getElementById('syncActiveNodesList');
+  const arrowEl = document.getElementById('syncActiveNodesArrow');
+  const textEl = document.getElementById('syncActiveNodesToggleText');
+  if (!listEl) return;
+  const isHidden = listEl.style.display === 'none' || !listEl.style.display;
+  listEl.style.display = isHidden ? 'flex' : 'none';
+  if (arrowEl) arrowEl.textContent = isHidden ? '▾' : '▸';
+  if (textEl) textEl.textContent = isHidden ? 'ซ่อนรายการ' : 'แสดงรายการ';
 }
 
 function copySyncLanUrl(url) {

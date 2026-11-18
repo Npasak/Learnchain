@@ -1711,13 +1711,20 @@
             </div>
           </div>
 
-          <!-- รายชื่อเครื่องที่กำลังเชื่อมต่ออยู่ -->
+          <!-- รายชื่อเครื่องที่กำลังเชื่อมต่ออยู่ (หด/ขยายได้) -->
           <div style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px dashed var(--border);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.45rem;">
-              <span style="font-size:0.82rem; font-weight:700; color:var(--text);">🖥️ เครื่องที่เชื่อมต่ออยู่ในระบบตอนนี้:</span>
-              <span id="syncLastSyncLabel" style="font-size:0.75rem; color:var(--muted);">ยังไม่ได้ซิงค์</span>
-            </div>
-            <div id="syncActiveNodesList" style="display:flex; flex-direction:column; gap:0.35rem; font-size:0.8rem;"></div>
+            <button type="button" onclick="toggleSyncActiveNodes()" style="width:100%; background:transparent; border:none; padding:0.2rem 0; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap; text-align:left;">
+              <span style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; font-weight:700; color:var(--text);">
+                <span id="syncActiveNodesArrow" style="display:inline-block; width:0.9rem; text-align:center;">▸</span>
+                🖥️ เครื่องที่เชื่อมต่ออยู่ในระบบตอนนี้
+                <span id="syncActiveNodesCountBadge" class="badge" style="font-size:0.7rem;">0 เครื่อง</span>
+              </span>
+              <span style="display:inline-flex; align-items:center; gap:0.5rem;">
+                <span id="syncLastSyncLabel" style="font-size:0.75rem; color:var(--muted);">ยังไม่ได้ซิงค์</span>
+                <span id="syncActiveNodesToggleText" style="font-size:0.73rem; color:var(--primary); font-weight:600;">แสดงรายการ</span>
+              </span>
+            </button>
+            <div id="syncActiveNodesList" style="display:none; flex-direction:column; gap:0.35rem; font-size:0.8rem; max-height:260px; overflow-y:auto; margin-top:0.5rem; padding-right:0.2rem;"></div>
           </div>
         </div>
 
