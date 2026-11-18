@@ -255,17 +255,65 @@ func main() {
 		})
 	})
 
-	// 8. Check if port is already running (avoid black window flash on double-click)
-	url := handlers.FormatHTTPURL("localhost", cfg.Port)
-	if conn, err := net.DialTimeout("tcp", "127.0.0.1:"+cfg.Port, 350*time.Millisecond); err == nil {
-		_ = conn.Close()
-		log.Printf("⚠️ ระบบ LearnChain กำลังทำงานอยู่แล้วบนพอร์ต %s — กำลังเปิดหน้าเว็บ %s ให้ทันที...", cfg.Port, url)
-		if cfg.AutoOpenBrowser {
-			openBrowser(url)
+	// 8. Check if LearnChain itself is already running on candidate ports; otherwise bind first available port (auto-fallback from 80)
+	candidatePorts := []string{cfg.Port, "8080", "8888", "3000", "8081", "8082", "8083"}
+	seenPorts := make(map[string]bool)
+	var uniquePorts []string
+	for _, p := range candidatePorts {
+		p = strings.TrimSpace(p)
+		if p != "" && !seenPorts[p] {
+			seenPorts[p] = true
+			uniquePorts = append(uniquePorts, p)
 		}
-		time.Sleep(3 * time.Second)
-		return
 	}
+
+	isLearnChainRunningOn := func(port string) bool {
+		client := &http.Client{Timeout: 450 * time.Millisecond}
+		resp, err := client.Get("http://127.0.0.1:" + port + "/api/sync/ping")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return strings.Contains(string(body), `"node_id"`)
+	}
+
+	for _, p := range uniquePorts {
+		if isLearnChainRunningOn(p) {
+			runningURL := handlers.FormatHTTPURL("localhost", p)
+			log.Printf("⚠️ ระบบ LearnChain กำลังทำงานอยู่แล้วบนพอร์ต %s — กำลังเปิดหน้าเว็บ %s ให้ทันที...", p, runningURL)
+			if cfg.AutoOpenBrowser {
+				openBrowser(runningURL)
+			}
+			time.Sleep(3 * time.Second)
+			return
+		}
+	}
+
+	var ln net.Listener
+	var listenErr error
+	for _, p := range uniquePorts {
+		ln, listenErr = net.Listen("tcp", ":"+p)
+		if listenErr == nil {
+			if p != cfg.Port {
+				log.Printf("ℹ️ พอร์ต %s ไม่ว่างหรือถูกใช้งานโดยโปรแกรมอื่น — สลับไปใช้พอร์ต %s อัตโนมัติ", cfg.Port, p)
+			}
+			cfg.Port = p
+			break
+		}
+	}
+	if ln == nil {
+		log.Printf("❌ ไม่สามารถเปิดพอร์ตใดๆ ได้ (%v)", listenErr)
+		log.Println("กด Enter เพื่อปิดหน้าต่าง...")
+		_, _ = fmt.Scanln()
+		os.Exit(1)
+	}
+
+	go ensureWindowsFirewallPort(cfg.Port)
+	url := handlers.FormatHTTPURL("localhost", cfg.Port)
 
 	// 9. Auto-Open Browser Goroutine
 	if cfg.AutoOpenBrowser {
@@ -282,7 +330,7 @@ func main() {
 		for _, ip := range handlers.GetLocalIPs() {
 			log.Printf("🌐 เครื่องอื่นในวง LAN เข้าใช้งานร่วมกันได้ที่: %s", handlers.FormatHTTPURL(ip, cfg.Port))
 		}
-		if err := app.Listen(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
+		if err := app.Listener(ln); err != nil && err != http.ErrServerClosed {
 			log.Printf("❌ Server error: %v", err)
 			log.Println("กด Enter เพื่อปิดหน้าต่าง...")
 			_, _ = fmt.Scanln()
