@@ -34,6 +34,7 @@ func NewManagerHandler(es *services.EmailService) *ManagerHandler {
 
 type LessonManagerStatsDTO struct {
 	LessonID          uint                         `json:"lesson_id"`
+	SortOrder         int                          `json:"sort_order"`
 	LessonTitle       string                       `json:"lesson_title"`
 	OpenPeriod        string                       `json:"open_period"`
 	IsHidden          bool                         `json:"is_hidden"`
@@ -76,7 +77,7 @@ type LearnerProgressOverviewDTO struct {
 // GetDashboard returns lessons, assignments, learner lists, and detailed progress stats
 func (h *ManagerHandler) GetDashboard(c *fiber.Ctx) error {
 	var lessons []models.Lesson
-	database.DB.Order("id asc").Find(&lessons)
+	database.DB.Order("sort_order asc, id asc").Find(&lessons)
 
 	var allLearners []models.User
 	database.DB.Where("role = ? OR role = ''", "learner").Order("name asc").Find(&allLearners)
@@ -212,6 +213,7 @@ func (h *ManagerHandler) GetDashboard(c *fiber.Ctx) error {
 		ratingStats := ComputeLessonRatingStats(l.ID, 0)
 		resultLessons = append(resultLessons, LessonManagerStatsDTO{
 			LessonID:          l.ID,
+			SortOrder:         l.SortOrder,
 			LessonTitle:       l.Title,
 			OpenPeriod:        l.OpenPeriod,
 			IsHidden:          l.IsHidden,
@@ -1012,6 +1014,7 @@ func (h *ManagerHandler) GetLessonLearnersStats(c *fiber.Ctx) error {
 
 type WardLearnerLessonDTO struct {
 	LessonID           uint    `json:"lesson_id"`
+	SortOrder          int     `json:"sort_order"`
 	LessonTitle        string  `json:"lesson_title"`
 	DurationSec        float64 `json:"duration_sec"`
 	IsAssigned         bool    `json:"is_assigned"`
@@ -1226,6 +1229,7 @@ func (h *ManagerHandler) GetWardLearnersStats(c *fiber.Ctx) error {
 
 			grp.dto.Lessons = append(grp.dto.Lessons, WardLearnerLessonDTO{
 				LessonID:           l.ID,
+				SortOrder:          l.SortOrder,
 				LessonTitle:        l.Title,
 				DurationSec:        l.DurationSec,
 				IsAssigned:         isAssigned,

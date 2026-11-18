@@ -643,6 +643,19 @@ function toggleShowAllManagerLessonStats() {
   filterManagerLessons();
 }
 
+function getLessonDisplayNum(l) {
+  return (l && l.sort_order > 0) ? l.sort_order : (l ? (l.lesson_id || l.id || '') : '');
+}
+
+function matchesLessonQuery(l, query) {
+  if (!query) return true;
+  const num = getLessonDisplayNum(l);
+  const title = (l.title || l.lesson_title || '').toLowerCase();
+  const summary = (l.summary || l.description || l.course_title || '').toLowerCase();
+  const orderText = `บทที่ ${num} #${num} ${num}`.toLowerCase();
+  return title.includes(query) || summary.includes(query) || orderText.includes(query);
+}
+
 function renderLearnerLessonsUI(filterText = '') {
   const assignedList   = document.getElementById('assignedLessonsList');
   const openList       = document.getElementById('openLessonsList');
@@ -665,7 +678,7 @@ function renderLearnerLessonsUI(filterText = '') {
 
   // 1. Render Pending Assigned Lessons
   const filteredAssigned = query
-    ? pendingAssigned.filter(l => (l.title||'').toLowerCase().includes(query) || (l.summary||'').toLowerCase().includes(query))
+    ? pendingAssigned.filter(l => matchesLessonQuery(l, query))
     : pendingAssigned;
 
   if (filteredAssigned.length === 0) {
@@ -687,7 +700,7 @@ function renderLearnerLessonsUI(filterText = '') {
   }
 
   // 2. Render All Open Lessons (Default: 5 Recommended Lessons unless searching or expanded)
-  const filteredOpen = query ? open.filter(l => (l.title||'').toLowerCase().includes(query) || (l.summary||'').toLowerCase().includes(query)) : open;
+  const filteredOpen = query ? open.filter(l => matchesLessonQuery(l, query)) : open;
   const displayedOpen = (!query && !showAllOpenLessons)
     ? filteredOpen.slice(0, RECOMMENDED_LESSONS_LIMIT)
     : filteredOpen;
@@ -1710,10 +1723,11 @@ function buildLessonComparisonChartSVG(lessons, activeWard) {
     const hPre = Math.max(2, (Math.min(100, m.prePct) / 100) * plotH);
     const hPost = Math.max(2, (Math.min(100, m.postPct) / 100) * plotH);
     const hScore = Math.max(2, (Math.min(100, m.avgScore) / 100) * plotH);
-    const shortTitle = `#${l.lesson_id}`;
+    const num = getLessonDisplayNum(l);
+    const shortTitle = `บทที่ ${num}`;
     return `
       <g onclick="openLessonLearnersModal(${l.lesson_id}, '${escapeHtml(l.lesson_title)}')" style="cursor:pointer;">
-        <title>#${l.lesson_id} ${escapeHtml(l.lesson_title)} | ก่อนเรียน: ${m.prePct.toFixed(1)}% | หลังเรียน: ${m.postPct.toFixed(1)}% | คะแนนเฉลี่ย: ${m.avgScore.toFixed(1)}%</title>
+        <title>บทที่ ${num} ${escapeHtml(l.lesson_title)} | ก่อนเรียน: ${m.prePct.toFixed(1)}% | หลังเรียน: ${m.postPct.toFixed(1)}% | คะแนนเฉลี่ย: ${m.avgScore.toFixed(1)}%</title>
         <rect x="${cx - barW * 1.5 - 2}" y="${padT + plotH - hPre}" width="${barW}" height="${hPre}" rx="3" fill="#818cf8" class="svg-bar-anim" />
         <rect x="${cx - barW * 0.5}" y="${padT + plotH - hPost}" width="${barW}" height="${hPost}" rx="3" fill="#10b981" class="svg-bar-anim" />
         <rect x="${cx + barW * 0.5 + 2}" y="${padT + plotH - hScore}" width="${barW}" height="${hScore}" rx="3" fill="#f59e0b" class="svg-bar-anim" />
@@ -1750,7 +1764,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
 
   const filteredLessons = allManagerLessons.filter(l => {
     if (!query) return true;
-    const titleMatch = (l.lesson_title || '').toLowerCase().includes(query) || (l.course_title || '').toLowerCase().includes(query);
+    const titleMatch = matchesLessonQuery(l, query);
     const assignedMatch = (l.assigned_users || []).some(u =>
       (u.name || '').toLowerCase().includes(query) ||
       (u.email || '').toLowerCase().includes(query) ||
@@ -1805,7 +1819,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
         <div class="manager-lesson-card">
           <div class="manager-lesson-header">
             <div>
-              <h3 style="font-size:1.05rem; color:var(--text); margin-bottom:0.25rem">#${l.lesson_id} ${escapeHtml(l.lesson_title)}</h3>
+              <h3 style="font-size:1.05rem; color:var(--text); margin-bottom:0.25rem"><span class="badge" style="background:rgba(14,165,233,0.12); color:var(--primary); border:1px solid rgba(14,165,233,0.3); margin-right:0.35rem;">บทที่ ${getLessonDisplayNum(l)}</span>${escapeHtml(l.lesson_title)}</h3>
               <div style="font-size:0.8rem; color:var(--muted); line-height:1.55;">
                 <div>ผู้สร้าง: ${escapeHtml(l.creator_name)} • เปิดให้เรียนถึงวันที่: ${escapeHtml(l.open_period || 'เปิดตลอดเวลา')}</div>
               </div>
@@ -1952,7 +1966,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
       <div class="mgr-graph-card" style="cursor:pointer; transition:transform 0.15s ease, border-color 0.15s ease;" onclick="openLessonLearnersModal(${l.lesson_id}, '${escapeHtml(l.lesson_title)}')" title="คลิกเพื่อโหลดสถิติผู้เรียนแต่ละคน">
         <div class="mgr-graph-hdr">
           <div>
-            <div class="mgr-graph-title">#${l.lesson_id} ${escapeHtml(l.lesson_title)}</div>
+            <div class="mgr-graph-title">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</div>
             <div class="mgr-graph-sub">เวลาเรียนขั้นต่ำ: ${reqSec} วินาที ${activeWard ? `• เฉพาะหน่วยงาน: ${escapeHtml(activeWard)}` : ''}</div>
           </div>
           <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
@@ -2036,7 +2050,7 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
     const avgSec   = m.avgSec;
     return `
       <tr>
-        <td style="font-weight:600;">#${l.lesson_id} ${escapeHtml(l.lesson_title)}</td>
+        <td style="font-weight:600;">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</td>
         <td style="text-align:center;">${totalL} คน</td>
         <td style="text-align:center;">${(totalSec/60).toFixed(1)} นาที (${totalSec}s)</td>
         <td style="text-align:center;">${(avgSec/60).toFixed(1)} นาที (${avgSec}s)</td>
@@ -2294,7 +2308,7 @@ function printManagerReport() {
       <div style="border:1px solid #cbd5e1; border-radius:10px; padding:14px 16px; background:#ffffff; page-break-inside:avoid;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid #e2e8f0; padding-bottom:8px; margin-bottom:10px;">
           <div>
-            <div style="font-size:13.5px; font-weight:700; color:#0f172a;">#${l.lesson_id} ${escapeHtml(l.lesson_title)}</div>
+            <div style="font-size:13.5px; font-weight:700; color:#0f172a;">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</div>
             <div style="font-size:11px; color:#64748b;">เวลารวม: ${totalMin} นาที (${totalSec}s) | เฉลี่ย: ${avgMin} นาที (${avgSec}s/คน) | สอบผ่าน: ${postCount}/${totalL} คน (${m.postPct.toFixed(1)}%)</div>
           </div>
           <span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap;">ผู้เรียน ${totalL} คน</span>
@@ -2353,7 +2367,7 @@ function printManagerReport() {
     const avgSec   = m.avgSec;
     return `
       <tr style="border-bottom:1px solid #cbd5e1;">
-        <td style="padding:8px 10px; font-weight:600; color:#0f172a;">#${l.lesson_id} ${escapeHtml(l.lesson_title)}</td>
+        <td style="padding:8px 10px; font-weight:600; color:#0f172a;">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</td>
         <td style="padding:8px 10px; text-align:center; color:#334155;">${totalL} คน</td>
         <td style="padding:8px 10px; text-align:center; color:#334155;">${(totalSec/60).toFixed(1)} นาที (${totalSec}s)</td>
         <td style="padding:8px 10px; text-align:center; color:#334155;">${(avgSec/60).toFixed(1)} นาที (${avgSec}s)</td>
@@ -4023,7 +4037,7 @@ function renderWardLearnersList() {
     if (query) {
       const personMatch = (m.name || '').toLowerCase().includes(query) || (m.email || '').toLowerCase().includes(query);
       if (!personMatch) {
-        lessons = lessons.filter(l => (l.lesson_title || '').toLowerCase().includes(query));
+        lessons = lessons.filter(l => matchesLessonQuery(l, query));
       }
       if (!personMatch && lessons.length === 0) return null;
     } else if (statusFilter && lessons.length === 0) {
@@ -4050,7 +4064,7 @@ function renderWardLearnersList() {
           return `
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; padding:0.45rem 0.65rem; background:var(--card); border:1px solid var(--border); border-radius:8px; font-size:0.78rem;">
               <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
-                <strong style="color:var(--text);">#${l.lesson_id} ${escapeHtml(l.lesson_title)}</strong>
+                <strong style="color:var(--text);">บทที่ ${getLessonDisplayNum(l)} • ${escapeHtml(l.lesson_title)}</strong>
                 ${l.is_assigned ? '<span class="badge" style="font-size:0.66rem; background:rgba(245,158,11,0.12); color:#d97706;">📌 มอบหมาย</span>' : ''}
               </div>
               <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
