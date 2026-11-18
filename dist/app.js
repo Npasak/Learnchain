@@ -2115,13 +2115,20 @@ function renderManagerUI(filterText = undefined, wardFilter = undefined) {
         </span>
       `).join('');
 
+      const thumb = l.thumbnail_url || 'https://images.unsplash.com/photo-1622979135225-d2ba269bc1df?q=80&w=400';
       return `
         <div class="manager-lesson-card">
-          <div class="manager-lesson-header">
-            <div>
-              <h3 style="font-size:1.05rem; color:var(--text); margin-bottom:0.25rem"><span class="badge" style="background:rgba(14,165,233,0.12); color:var(--primary); border:1px solid rgba(14,165,233,0.3); margin-right:0.35rem;">#${getLessonDisplayNum(l)}</span>${escapeHtml(l.lesson_title)}</h3>
-              <div style="font-size:0.8rem; color:var(--muted); line-height:1.55;">
-                <div>ผู้สร้าง: ${escapeHtml(l.creator_name)} • เปิดให้เรียนถึงวันที่: ${escapeHtml(l.open_period || 'เปิดตลอดเวลา')}</div>
+          <div class="manager-lesson-header" style="align-items:flex-start;">
+            <div style="display:flex; gap:0.9rem; align-items:center; flex:1; min-width:240px; flex-wrap:wrap;">
+              <div class="lesson-thumb-wrap" style="width:128px; height:78px; flex-shrink:0; border-radius:10px; overflow:hidden; box-shadow:0 4px 12px rgba(15,23,42,0.12);">
+                <img class="lesson-thumb" src="${thumb}" alt="${escapeHtml(l.lesson_title)}" loading="lazy" style="width:100%; height:100%; object-fit:cover;">
+                <div class="lesson-order">#${getLessonDisplayNum(l)}</div>
+              </div>
+              <div style="flex:1; min-width:180px;">
+                <h3 style="font-size:1.05rem; color:var(--text); margin-bottom:0.25rem; line-height:1.35;">${escapeHtml(l.lesson_title)}</h3>
+                <div style="font-size:0.8rem; color:var(--muted); line-height:1.55;">
+                  <div>👨‍🏫 ผู้สร้าง: ${escapeHtml(l.creator_name)} • ⏰ เปิดให้เรียนถึง: ${escapeHtml(l.open_period || 'เปิดตลอดเวลา')}</div>
+                </div>
               </div>
             </div>
             <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">

@@ -36,6 +36,7 @@ type LessonManagerStatsDTO struct {
 	LessonID          uint                         `json:"lesson_id"`
 	SortOrder         int                          `json:"sort_order"`
 	LessonTitle       string                       `json:"lesson_title"`
+	ThumbnailURL      string                       `json:"thumbnail_url"`
 	OpenPeriod        string                       `json:"open_period"`
 	IsHidden          bool                         `json:"is_hidden"`
 	DurationSec       float64                      `json:"duration_sec"`
@@ -215,6 +216,7 @@ func (h *ManagerHandler) GetDashboard(c *fiber.Ctx) error {
 			LessonID:          l.ID,
 			SortOrder:         l.SortOrder,
 			LessonTitle:       l.Title,
+			ThumbnailURL:      l.ThumbnailURL,
 			OpenPeriod:        l.OpenPeriod,
 			IsHidden:          l.IsHidden,
 			DurationSec:       l.DurationSec,
