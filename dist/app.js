@@ -546,7 +546,7 @@ async function loadLearnerDashboard() {
   currentCourse = data.course;
   currentCourseID = currentCourse.id;
   const summary = data.summary || {};
-  allLearnerLessons = data.lessons || [];
+  allLearnerLessons = assignSequentialLessonNums(data.lessons || []);
 
   // Update Blockchain ledger stats
   const total     = summary.total_lessons || 0;
@@ -643,8 +643,22 @@ function toggleShowAllManagerLessonStats() {
   filterManagerLessons();
 }
 
+function assignSequentialLessonNums(list) {
+  (list || []).forEach((l, idx) => {
+    l._displayNum = idx + 1;
+  });
+  return list || [];
+}
+
 function getLessonDisplayNum(l) {
-  return (l && l.sort_order > 0) ? l.sort_order : (l ? (l.lesson_id || l.id || '') : '');
+  if (!l) return '';
+  if (l._displayNum > 0) return l._displayNum;
+  const lid = l.lesson_id || l.id;
+  if (lid && typeof allManagerLessons !== 'undefined' && Array.isArray(allManagerLessons)) {
+    const m = allManagerLessons.find(x => x.lesson_id === lid);
+    if (m && m._displayNum > 0) return m._displayNum;
+  }
+  return l.sort_order > 0 ? l.sort_order : (lid || '');
 }
 
 function matchesLessonQuery(l, query) {
@@ -787,7 +801,7 @@ function createLearnerLessonCard(l, isAssignedSection) {
     <div class="lesson-item">
       <div class="lesson-thumb-wrap">
         <img class="lesson-thumb" src="${thumb}" alt="${escapeHtml(l.title)}" loading="lazy">
-        <div class="lesson-order">${l.sort_order}</div>
+        <div class="lesson-order">${getLessonDisplayNum(l)}</div>
       </div>
       <div class="lesson-info">
         <div class="lesson-name">${escapeHtml(l.title)}</div>
@@ -1128,7 +1142,7 @@ async function loadCreatorDashboard() {
 
   currentCourse = data.course;
   currentCourseID = currentCourse.id;
-  allCreatorLessons = currentCourse.lessons || [];
+  allCreatorLessons = assignSequentialLessonNums(currentCourse.lessons || []);
 
   // Update Creator Metrics
   const total = allCreatorLessons.length;
@@ -1180,7 +1194,7 @@ function renderCreatorLessonsUI() {
       <div class="lesson-item" onclick="openLessonRatingsModal(${l.id}, '${escapeHtml(l.title)}')" style="cursor:pointer; ${isHidden ? 'opacity:0.75; border-color:rgba(239,68,68,0.3);' : ''}" title="คลิกที่การ์ดเพื่อดูสถิติคะแนน 1-5 ดาว">
         <div class="lesson-thumb-wrap">
           <img class="lesson-thumb" src="${thumb}" alt="${escapeHtml(l.title)}" loading="lazy">
-          <div class="lesson-order">${l.sort_order}</div>
+          <div class="lesson-order">${getLessonDisplayNum(l)}</div>
         </div>
         <div class="lesson-info">
           <div class="lesson-name">${escapeHtml(l.title)}</div>
@@ -1380,7 +1394,7 @@ async function loadManagerDashboard() {
   const data = await fetchJSON('/api/manager/dashboard');
   if (!data || !data.success) return;
 
-  allManagerLessons = data.lessons || [];
+  allManagerLessons = assignSequentialLessonNums(data.lessons || []);
   allSystemLearners = data.learners || [];
   allSystemCreators = data.creators || [];
   allSystemManagers = data.managers || [];
@@ -2507,7 +2521,7 @@ async function openLesson(lessonId) {
   currentLesson = data.lesson;
   const progress = data.progress || {};
 
-  set('modalBadge',   `บทที่ ${currentLesson.sort_order}`);
+  set('modalBadge',   `บทที่ ${getLessonDisplayNum(currentLesson)}`);
   set('modalTitle',   currentLesson.title);
   set('modalSummary', currentLesson.summary || currentLesson.description || '');
 
