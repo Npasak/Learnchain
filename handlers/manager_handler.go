@@ -1330,12 +1330,14 @@ func (h *ManagerHandler) DeleteReportedComment(c *fiber.Ctx) error {
 		})
 	}
 
+	now := time.Now()
 	if err := database.DB.Model(&models.LessonRating{}).Where("id = ?", uint(ratingID)).Updates(map[string]interface{}{
-		"comment":       "",
-		"is_reported":   false,
-		"report_reason": "",
-		"reported_by":   "",
-		"reported_at":   nil,
+		"comment":              "",
+		"is_reported":          false,
+		"report_reason":        "",
+		"reported_by":          "",
+		"reported_at":          nil,
+		"comment_moderated_at": &now,
 	}).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,

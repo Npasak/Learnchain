@@ -89,13 +89,14 @@ type ActiveNodeInfo struct {
 
 // SyncConfig stores persistent Auto-Sync settings for this machine
 type SyncConfig struct {
-	GasURL            string           `json:"gas_url"`
-	AutoSyncEnabled   bool             `json:"auto_sync_enabled"`
-	IntervalSec       int              `json:"interval_sec"`
-	TimeoutSec        int              `json:"timeout_sec"`
-	PreferredMasterIP string           `json:"preferred_master_ip,omitempty"` // "" = auto fastest IP
-	PreferredMasterID string           `json:"preferred_master_id,omitempty"` // therunrock override
-	KnownPeers        []ActiveNodeInfo `json:"known_peers,omitempty"`
+	GasURL               string           `json:"gas_url"`
+	AutoSyncEnabled      bool             `json:"auto_sync_enabled"`
+	IntervalSec          int              `json:"interval_sec"`
+	TimeoutSec           int              `json:"timeout_sec"`
+	PreferredMasterIP    string           `json:"preferred_master_ip,omitempty"` // "" = auto fastest IP
+	PreferredMasterID    string           `json:"preferred_master_id,omitempty"` // therunrock override
+	LastSuccessfulSyncMs int64            `json:"last_successful_sync_ms,omitempty"`
+	KnownPeers           []ActiveNodeInfo `json:"known_peers,omitempty"`
 }
 
 type SyncHandler struct {
@@ -343,18 +344,48 @@ func (h *SyncHandler) StartAutoSyncWorker() {
 
 // SyncSnapshot represents the complete portable dataset across machines
 type SyncSnapshot struct {
-	Version      string               `json:"version"`
-	ExportedAt   time.Time            `json:"exported_at"`
-	SourceHost   string               `json:"source_host"`
-	Users        []SyncUserDTO        `json:"users"`
-	Courses      []models.Course      `json:"courses"`
-	Lessons             []SyncLessonDTO      `json:"lessons"`
-	CoverFiles          []SyncCoverFileDTO   `json:"cover_files,omitempty"`
-	DeletedCovers       []string             `json:"deleted_covers,omitempty"`
-	DeletedLessonTitles []string             `json:"deleted_lesson_titles,omitempty"`
-	Assignments   []SyncAssignmentDTO  `json:"assignments"`
-	ProgressList []SyncProgressDTO    `json:"progress_list"`
-	Certificates []SyncCertificateDTO `json:"certificates"`
+	Version             string                          `json:"version"`
+	ExportedAt          time.Time                       `json:"exported_at"`
+	SourceHost          string                          `json:"source_host"`
+	Users               []SyncUserDTO                   `json:"users"`
+	Courses             []models.Course                 `json:"courses"`
+	Lessons             []SyncLessonDTO                 `json:"lessons"`
+	CoverFiles          []SyncCoverFileDTO              `json:"cover_files,omitempty"`
+	DeletedCovers       []string                        `json:"deleted_covers,omitempty"`
+	DeletedLessonTitles []string                        `json:"deleted_lesson_titles,omitempty"`
+	DeletedLessons      []DeletedLessonTombstoneDTO     `json:"deleted_lessons,omitempty"`
+	DeletedAssignments  []DeletedAssignmentTombstoneDTO `json:"deleted_assignments,omitempty"`
+	DeletedUsers        []DeletedUserTombstoneDTO       `json:"deleted_users,omitempty"`
+	ModeratedComments   []ModeratedCommentTombstoneDTO  `json:"moderated_comments,omitempty"`
+	Assignments         []SyncAssignmentDTO             `json:"assignments"`
+	ProgressList        []SyncProgressDTO               `json:"progress_list"`
+	Certificates        []SyncCertificateDTO            `json:"certificates"`
+}
+
+type DeletedLessonTombstoneDTO struct {
+	Title     string    `json:"title"`
+	DeletedAt time.Time `json:"deleted_at"`
+}
+
+type DeletedAssignmentTombstoneDTO struct {
+	LessonTitle string    `json:"lesson_title"`
+	UserEmail   string    `json:"user_email"`
+	UserWallet  string    `json:"user_wallet"`
+	DeletedAt   time.Time `json:"deleted_at"`
+}
+
+type DeletedUserTombstoneDTO struct {
+	Email         string    `json:"email"`
+	Role          string    `json:"role"`
+	WalletAddress string    `json:"wallet_address"`
+	DeletedAt     time.Time `json:"deleted_at"`
+}
+
+type ModeratedCommentTombstoneDTO struct {
+	LessonTitle string    `json:"lesson_title"`
+	UserEmail   string    `json:"user_email"`
+	UserWallet  string    `json:"user_wallet"`
+	DeletedAt   time.Time `json:"deleted_at"`
 }
 
 type SyncUserDTO struct {
@@ -366,6 +397,7 @@ type SyncUserDTO struct {
 	Role          string    `json:"role"`
 	AvatarURL     string    `json:"avatar_url"`
 	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
 type SyncCoverFileDTO struct {
@@ -389,6 +421,7 @@ type SyncLessonDTO struct {
 	PassScorePct    float64       `json:"pass_score_pct"`
 	DisablePreTest  bool          `json:"disable_pre_test"`
 	DisablePostTest bool          `json:"disable_post_test"`
+	UpdatedAt       time.Time     `json:"updated_at,omitempty"`
 	Quizzes         []models.Quiz `json:"quizzes"`
 }
 
@@ -550,31 +583,44 @@ func (h *SyncHandler) GetSyncInfo(c *fiber.Ctx) error {
 	isSelfMaster := h.isSelfMaster
 	syncSuccessCount := h.syncSuccessCount
 	syncFailCount := h.syncFailCount
+	lastSuccessMs := h.cfg.LastSuccessfulSyncMs
 	localScore := h.selfStabilityScoreLocked()
 	h.mu.Unlock()
+
+	offlineDays := 0
+	staleOfflineWarning := false
+	if lastSuccessMs > 0 {
+		offlineDays = int(time.Since(time.UnixMilli(lastSuccessMs)).Hours() / 24)
+		if offlineDays >= 30 {
+			staleOfflineWarning = true
+		}
+	}
 
 	publicIP, webOnline, webLatencyMs := getPublicIPAndWebStatus()
 
 	return c.JSON(fiber.Map{
-		"success":               true,
-		"app_version":           version.Version,
-		"is_god_therunrock":     isGod,
-		"gas_url_hidden":        !isGod,
-		"node_id":               nodeID,
-		"hostname":              hostname,
-		"port":                  port,
-		"primary_lan_url":       primaryLanURL,
-		"lan_ips":               GetLocalIPs(),
-		"lan_urls":              lanURLs,
-		"public_ip":             publicIP,
-		"web_online":            webOnline,
-		"web_latency_ms":        webLatencyMs,
-		"is_self_master":        isSelfMaster,
-		"elected_master_id":     masterID,
-		"elected_master_ip":     masterIP,
-		"sync_transport":        syncTransport,
-		"sync_success_count":    syncSuccessCount,
-		"sync_fail_count":       syncFailCount,
+		"success":                 true,
+		"app_version":             version.Version,
+		"is_god_therunrock":       isGod,
+		"gas_url_hidden":          !isGod,
+		"node_id":                 nodeID,
+		"hostname":                hostname,
+		"port":                    port,
+		"primary_lan_url":         primaryLanURL,
+		"lan_ips":                 GetLocalIPs(),
+		"lan_urls":                lanURLs,
+		"public_ip":               publicIP,
+		"web_online":              webOnline,
+		"web_latency_ms":          webLatencyMs,
+		"is_self_master":          isSelfMaster,
+		"elected_master_id":       masterID,
+		"elected_master_ip":       masterIP,
+		"sync_transport":          syncTransport,
+		"sync_success_count":      syncSuccessCount,
+		"sync_fail_count":         syncFailCount,
+		"last_successful_sync_ms": lastSuccessMs,
+		"offline_days":            offlineDays,
+		"stale_offline_warning":   staleOfflineWarning,
 		"gas_status":            gasStatus,
 		"gas_status_text":       gasStatusText,
 		"local_stability_score": localScore,
@@ -939,6 +985,7 @@ func (h *SyncHandler) updateKnownPeersLocked(activeList []ActiveNodeInfo) {
 		}
 	}
 	h.cfg.KnownPeers = peers
+	h.cfg.LastSuccessfulSyncMs = time.Now().UnixMilli()
 	h.saveConfigToFile()
 }
 
@@ -1279,6 +1326,7 @@ func BuildSnapshot() SyncSnapshot {
 			Role:          u.Role,
 			AvatarURL:     u.AvatarURL,
 			CreatedAt:     u.CreatedAt,
+			UpdatedAt:     u.UpdatedAt,
 		})
 	}
 
@@ -1327,10 +1375,13 @@ func BuildSnapshot() SyncSnapshot {
 			PassScorePct:    l.PassScorePct,
 			DisablePreTest:  l.DisablePreTest,
 			DisablePostTest: l.DisablePostTest,
+			UpdatedAt:       l.UpdatedAt,
 			Quizzes:         l.Quizzes,
 		})
 		collectCover(l.ThumbnailURL)
 	}
+
+	tombstoneCutoff := time.Now().Add(-90 * 24 * time.Hour)
 
 	var deletedLessons []models.Lesson
 	database.DB.Unscoped().Where("deleted_at IS NOT NULL").Find(&deletedLessons)
@@ -1347,9 +1398,73 @@ func BuildSnapshot() SyncSnapshot {
 			seenDeletedTitles[dl.Title] = true
 			snap.DeletedLessonTitles = append(snap.DeletedLessonTitles, dl.Title)
 		}
+		if dl.Title != "" && dl.DeletedAt.Valid && dl.DeletedAt.Time.After(tombstoneCutoff) {
+			snap.DeletedLessons = append(snap.DeletedLessons, DeletedLessonTombstoneDTO{
+				Title:     dl.Title,
+				DeletedAt: dl.DeletedAt.Time,
+			})
+		}
 		if strings.HasPrefix(dl.ThumbnailURL, "/covers/") && !activeCoverSet[dl.ThumbnailURL] && !seenDeletedCovers[dl.ThumbnailURL] {
 			seenDeletedCovers[dl.ThumbnailURL] = true
 			snap.DeletedCovers = append(snap.DeletedCovers, dl.ThumbnailURL)
+		}
+	}
+
+	// Tombstones for deleted users (90-day TTL)
+	var deletedUsers []models.User
+	database.DB.Unscoped().Where("deleted_at IS NOT NULL AND deleted_at >= ?", tombstoneCutoff).Find(&deletedUsers)
+	userByIDAll := make(map[uint]models.User)
+	for _, u := range users {
+		userByIDAll[u.ID] = u
+	}
+	for _, du := range deletedUsers {
+		userByIDAll[du.ID] = du
+		if du.DeletedAt.Valid {
+			snap.DeletedUsers = append(snap.DeletedUsers, DeletedUserTombstoneDTO{
+				Email:         du.Email,
+				Role:          du.Role,
+				WalletAddress: du.WalletAddress,
+				DeletedAt:     du.DeletedAt.Time,
+			})
+		}
+	}
+
+	// Tombstones for deleted/unassigned lesson assignments (90-day TTL)
+	var deletedAssigns []models.LessonAssignment
+	database.DB.Unscoped().Where("deleted_at IS NOT NULL AND deleted_at >= ?", tombstoneCutoff).Find(&deletedAssigns)
+	lessonByIDAll := make(map[uint]models.Lesson)
+	for _, l := range lessons {
+		lessonByIDAll[l.ID] = l
+	}
+	for _, dl := range deletedLessons {
+		lessonByIDAll[dl.ID] = dl
+	}
+	for _, da := range deletedAssigns {
+		u, uOk := userByIDAll[da.UserID]
+		l, lOk := lessonByIDAll[da.LessonID]
+		if uOk && lOk && da.DeletedAt.Valid {
+			snap.DeletedAssignments = append(snap.DeletedAssignments, DeletedAssignmentTombstoneDTO{
+				LessonTitle: l.Title,
+				UserEmail:   u.Email,
+				UserWallet:  u.WalletAddress,
+				DeletedAt:   da.DeletedAt.Time,
+			})
+		}
+	}
+
+	// Tombstones for moderated/deleted learner comments (90-day TTL)
+	var modRatings []models.LessonRating
+	database.DB.Where("comment_moderated_at IS NOT NULL AND comment_moderated_at >= ?", tombstoneCutoff).Find(&modRatings)
+	for _, mr := range modRatings {
+		u, uOk := userByIDAll[mr.UserID]
+		l, lOk := lessonByIDAll[mr.LessonID]
+		if uOk && lOk && mr.CommentModeratedAt != nil {
+			snap.ModeratedComments = append(snap.ModeratedComments, ModeratedCommentTombstoneDTO{
+				LessonTitle: l.Title,
+				UserEmail:   u.Email,
+				UserWallet:  u.WalletAddress,
+				DeletedAt:   *mr.CommentModeratedAt,
+			})
 		}
 	}
 
@@ -1504,8 +1619,31 @@ func MergeSnapshot(snap *SyncSnapshot) fiber.Map {
 		database.DB.Create(&defaultCourse)
 	}
 
-	// 2. Merge Users
+	// 2. Merge Users (Last-Write-Wins via UpdatedAt + DeletedUsers tombstone)
+	deletedUserMap := make(map[string]time.Time)
+	for _, du := range snap.DeletedUsers {
+		if du.Email != "" {
+			k := strings.ToLower(du.Email) + "|" + du.Role
+			if prev, ok := deletedUserMap[k]; !ok || du.DeletedAt.After(prev) {
+				deletedUserMap[k] = du.DeletedAt
+			}
+		}
+		if du.WalletAddress != "" {
+			if prev, ok := deletedUserMap[du.WalletAddress]; !ok || du.DeletedAt.After(prev) {
+				deletedUserMap[du.WalletAddress] = du.DeletedAt
+			}
+		}
+	}
+
 	for _, su := range snap.Users {
+		uKey := strings.ToLower(su.Email) + "|" + su.Role
+		if delAt, isDel := deletedUserMap[uKey]; isDel && (su.UpdatedAt.IsZero() || !su.UpdatedAt.After(delAt)) {
+			continue
+		}
+		if delAt, isDel := deletedUserMap[su.WalletAddress]; isDel && (su.UpdatedAt.IsZero() || !su.UpdatedAt.After(delAt)) {
+			continue
+		}
+
 		var existing models.User
 		err := database.DB.Where("wallet_address = ?", su.WalletAddress).First(&existing).Error
 		if err != nil && su.Email != "" {
@@ -1525,23 +1663,43 @@ func MergeSnapshot(snap *SyncSnapshot) fiber.Map {
 				usersAdded++
 			}
 		} else {
+			isIncomingNewer := su.UpdatedAt.IsZero() || !existing.UpdatedAt.After(su.UpdatedAt)
 			changed := false
 			if existing.PasswordHash == "" && su.PasswordHash != "" {
 				existing.PasswordHash = su.PasswordHash
 				changed = true
 			}
-			if su.Name != "" && existing.Name != su.Name {
+			if isIncomingNewer && su.Name != "" && existing.Name != su.Name {
 				existing.Name = su.Name
 				changed = true
 			}
-			if su.Ward != "" && existing.Ward != su.Ward {
+			if isIncomingNewer && su.Ward != "" && existing.Ward != su.Ward {
 				existing.Ward = su.Ward
+				changed = true
+			}
+			if isIncomingNewer && su.AvatarURL != "" && existing.AvatarURL != su.AvatarURL {
+				existing.AvatarURL = su.AvatarURL
 				changed = true
 			}
 			if changed {
 				database.DB.Save(&existing)
 				usersUpdated++
 			}
+		}
+	}
+
+	// Soft-delete any local users flagged in DeletedUsers tombstone
+	for _, du := range snap.DeletedUsers {
+		var u models.User
+		var err error
+		if du.Email != "" {
+			err = database.DB.Where("LOWER(email) = ? AND role = ?", strings.ToLower(du.Email), du.Role).First(&u).Error
+		}
+		if err != nil && du.WalletAddress != "" {
+			err = database.DB.Where("wallet_address = ?", du.WalletAddress).First(&u).Error
+		}
+		if err == nil && u.UpdatedAt.Before(du.DeletedAt) {
+			database.DB.Delete(&u)
 		}
 	}
 
@@ -1559,35 +1717,60 @@ func MergeSnapshot(snap *SyncSnapshot) fiber.Map {
 		}
 	}
 
-	// 3. Build blocked/deleted lesson tombstone set so deleted or retired demo lessons never resurrect
-	blockedLessonTitles := make(map[string]bool)
+	// 3. Build blocked/deleted lesson tombstone set (timestamp-aware so re-created lessons with newer UpdatedAt are allowed)
+	permanentlyBlockedTitles := make(map[string]bool)
 	for _, retired := range database.RetiredDemoLessonTitles {
-		blockedLessonTitles[retired] = true
+		permanentlyBlockedTitles[retired] = true
+	}
+	deletedLessonTimeMap := make(map[string]time.Time)
+	for _, dl := range snap.DeletedLessons {
+		if dl.Title != "" {
+			if prev, ok := deletedLessonTimeMap[dl.Title]; !ok || dl.DeletedAt.After(prev) {
+				deletedLessonTimeMap[dl.Title] = dl.DeletedAt
+			}
+		}
 	}
 	for _, dt := range snap.DeletedLessonTitles {
 		if dt != "" {
-			blockedLessonTitles[dt] = true
+			if _, hasTs := deletedLessonTimeMap[dt]; !hasTs {
+				permanentlyBlockedTitles[dt] = true
+			}
 		}
 	}
 	var localDeletedLessons []models.Lesson
 	database.DB.Unscoped().Where("deleted_at IS NOT NULL").Find(&localDeletedLessons)
 	for _, dl := range localDeletedLessons {
-		if dl.Title != "" {
-			blockedLessonTitles[dl.Title] = true
+		if dl.Title != "" && dl.DeletedAt.Valid {
+			if prev, ok := deletedLessonTimeMap[dl.Title]; !ok || dl.DeletedAt.Time.After(prev) {
+				deletedLessonTimeMap[dl.Title] = dl.DeletedAt.Time
+			}
 		}
 	}
-	// Soft-delete any locally active lesson that is in the tombstone/retired list
-	if len(blockedLessonTitles) > 0 {
-		var titlesToDelete []string
-		for t := range blockedLessonTitles {
-			titlesToDelete = append(titlesToDelete, t)
+
+	isLessonBlocked := func(title string, updatedAt time.Time) bool {
+		if permanentlyBlockedTitles[title] {
+			return true
 		}
-		database.DB.Where("title IN ?", titlesToDelete).Delete(&models.Lesson{})
+		if delAt, ok := deletedLessonTimeMap[title]; ok {
+			if updatedAt.IsZero() || !updatedAt.After(delAt) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Soft-delete any locally active lesson that is permanently retired or deleted after its UpdatedAt
+	var activeLocalLessons []models.Lesson
+	database.DB.Find(&activeLocalLessons)
+	for _, al := range activeLocalLessons {
+		if isLessonBlocked(al.Title, al.UpdatedAt) {
+			database.DB.Delete(&al)
+		}
 	}
 
 	// Merge Lessons & Quizzes (skipping blocked/deleted lessons)
 	for _, sl := range snap.Lessons {
-		if blockedLessonTitles[sl.Title] {
+		if isLessonBlocked(sl.Title, sl.UpdatedAt) {
 			continue
 		}
 		var existingLesson models.Lesson
@@ -1643,6 +1826,10 @@ func MergeSnapshot(snap *SyncSnapshot) fiber.Map {
 				}
 			}
 		} else {
+			// LWW: only overwrite local lesson edits if incoming lesson is newer (or legacy without UpdatedAt)
+			if !sl.UpdatedAt.IsZero() && existingLesson.UpdatedAt.After(sl.UpdatedAt) {
+				continue
+			}
 			oldThumb := existingLesson.ThumbnailURL
 			existingLesson.Summary = sl.Summary
 			existingLesson.Description = sl.Description
@@ -1700,8 +1887,32 @@ func MergeSnapshot(snap *SyncSnapshot) fiber.Map {
 		return l, false
 	}
 
-	// 4. Merge Assignments
+	// 4. Merge Assignments + apply DeletedAssignments tombstones
+	deletedAssignMap := make(map[string]time.Time)
+	for _, da := range snap.DeletedAssignments {
+		k := da.LessonTitle + "|" + strings.ToLower(da.UserEmail)
+		if prev, ok := deletedAssignMap[k]; !ok || da.DeletedAt.After(prev) {
+			deletedAssignMap[k] = da.DeletedAt
+		}
+	}
+	for _, da := range snap.DeletedAssignments {
+		u, uOk := findLearner(da.UserEmail, da.UserWallet)
+		l, lOk := findLesson(da.LessonTitle)
+		if uOk && lOk {
+			var existingAssign models.LessonAssignment
+			if err := database.DB.Where("lesson_id = ? AND user_id = ?", l.ID, u.ID).First(&existingAssign).Error; err == nil {
+				if existingAssign.UpdatedAt.Before(da.DeletedAt) {
+					database.DB.Delete(&existingAssign)
+				}
+			}
+		}
+	}
+
 	for _, sa := range snap.Assignments {
+		k := sa.LessonTitle + "|" + strings.ToLower(sa.UserEmail)
+		if delAt, isDel := deletedAssignMap[k]; isDel && !sa.CreatedAt.After(delAt) {
+			continue
+		}
 		u, uOk := findLearner(sa.UserEmail, sa.UserWallet)
 		l, lOk := findLesson(sa.LessonTitle)
 		if !uOk || !lOk {
@@ -1715,6 +1926,28 @@ func MergeSnapshot(snap *SyncSnapshot) fiber.Map {
 				UserID:   u.ID,
 			}).Error == nil {
 				assignsAdded++
+			}
+		}
+	}
+
+	// 4.5 Apply ModeratedComments tombstones (ensure deleted inappropriate comments stay deleted)
+	for _, mc := range snap.ModeratedComments {
+		u, uOk := findLearner(mc.UserEmail, mc.UserWallet)
+		l, lOk := findLesson(mc.LessonTitle)
+		if uOk && lOk {
+			var rating models.LessonRating
+			if err := database.DB.Where("lesson_id = ? AND user_id = ?", l.ID, u.ID).First(&rating).Error; err == nil {
+				if rating.UpdatedAt.Before(mc.DeletedAt) && rating.Comment != "" {
+					modAt := mc.DeletedAt
+					database.DB.Model(&rating).Updates(map[string]interface{}{
+						"comment":              "",
+						"is_reported":          false,
+						"report_reason":        "",
+						"reported_by":          "",
+						"reported_at":          nil,
+						"comment_moderated_at": &modAt,
+					})
+				}
 			}
 		}
 	}
@@ -2153,4 +2386,85 @@ func (h *SyncHandler) FetchCoverFromGAS(fname string) ([]byte, bool) {
 	_ = os.MkdirAll(coversDir, 0755)
 	_ = os.WriteFile(filepath.Join(coversDir, fname), rawBytes, 0644)
 	return rawBytes, true
+}
+
+// CleanPullFromHub pulls the latest snapshot from Master (LAN) or GAS without pushing stale local data first.
+// Ideal for machines returning from long-term offline periods (> 30 days).
+func (h *SyncHandler) CleanPullFromHub(c *fiber.Ctx) error {
+	h.mu.Lock()
+	preferredIP := strings.TrimSpace(h.cfg.PreferredMasterIP)
+	masterID := h.electedMasterID
+	var masterCand *ActiveNodeInfo
+	if masterID != "" {
+		if n, ok := h.activeNodes[masterID]; ok && !n.IsSelf {
+			copyN := n
+			masterCand = &copyN
+		}
+	}
+	h.mu.Unlock()
+
+	var pulled *SyncSnapshot
+	usedSource := ""
+
+	// 1. Try elected Master on LAN first
+	if masterCand != nil {
+		bestURL, _, ok := h.selectBestNodeURL(collectNodeURLs(*masterCand), preferredIP)
+		if ok {
+			client := newSyncHTTPClient(15 * time.Second)
+			if resp, err := client.Get(strings.TrimRight(bestURL, "/") + "/api/sync/export"); err == nil {
+				bodyBytes, rErr := io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+				resp.Body.Close()
+				if rErr == nil && resp.StatusCode == http.StatusOK {
+					var s SyncSnapshot
+					if json.Unmarshal(bodyBytes, &s) == nil {
+						pulled = &s
+						usedSource = "LAN Master (" + bestURL + ")"
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Fallback to GAS GET (read-only pull of cloud snapshot)
+	if pulled == nil {
+		gasURL := h.getGASEndpoint()
+		if gasURL != "" {
+			client := newSyncHTTPClient(45 * time.Second)
+			if resp, err := client.Get(gasURL); err == nil {
+				bodyBytes, rErr := io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024))
+				resp.Body.Close()
+				if rErr == nil && resp.StatusCode == http.StatusOK {
+					var hub hubSyncResponse
+					if json.Unmarshal(bodyBytes, &hub) == nil && hub.Success && hub.Snapshot != nil {
+						pulled = hub.Snapshot
+						usedSource = "Google Apps Script (Cloud)"
+					}
+				}
+			}
+		}
+	}
+
+	if pulled == nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"success": false,
+			"message": "ไม่สามารถดึงข้อมูลล่าสุดจาก Master หรือ GAS ได้ในขณะนี้",
+		})
+	}
+
+	stats := MergeSnapshot(pulled)
+
+	h.mu.Lock()
+	h.syncSuccessCount++
+	h.cfg.LastSuccessfulSyncMs = time.Now().UnixMilli()
+	h.saveConfigToFile()
+	h.lastSyncAt = time.Now().Format("15:04:05")
+	h.lastSyncStatus = "✅ Clean Pull สำเร็จจาก " + usedSource
+	h.mu.Unlock()
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"source":  usedSource,
+		"message": "✅ ดึงข้อมูลล่าสุดจาก " + usedSource + " เรียบร้อยแล้ว",
+		"stats":   stats,
+	})
 }

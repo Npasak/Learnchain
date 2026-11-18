@@ -1571,12 +1571,21 @@ async function loadManagerNetworkStatus() {
   const allLocalIPs = (info.lan_ips && info.lan_ips.length > 0) ? info.lan_ips.join(', ') : '127.0.0.1';
   const pubIP = info.public_ip ? escapeHtml(info.public_ip) : '<span style="color:var(--muted);">ไม่พบ (ออฟไลน์)</span>';
   const roleLabel = info.is_self_master ? '👑 Master (เครื่องหลัก)' : '🔗 Peer (เครื่องลูก)';
+  const staleBanner = info.stale_offline_warning
+    ? `<div style="background:rgba(245,158,11,0.14); border:1px solid rgba(245,158,11,0.45); border-radius:8px; padding:0.55rem 0.75rem; margin-bottom:0.65rem; display:flex; align-items:center; justify-content:space-between; gap:0.6rem; flex-wrap:wrap;">
+        <div style="font-size:0.78rem; color:#fcd34d;">
+          ⚠️ <b>เครื่องนี้ออฟไลน์นาน ${info.offline_days || 0} วันแล้ว</b> — แนะนำให้ดึงข้อมูลกลางล่าสุด (Clean Pull) เพื่อป้องกันข้อมูลเก่าทับข้อมูลใหม่
+        </div>
+        <button type="button" class="btn btn-sm btn-warning" onclick="triggerCleanPull()">🧹 ดึงข้อมูลกลางล่าสุด (Clean Pull)</button>
+      </div>`
+    : '';
   const onlineNodes = info.active_nodes || [];
   const nodeTags = onlineNodes.map(n =>
     `<span class="badge ${n.is_master ? 'badge-ok' : ''}" style="font-size:0.7rem;">${n.is_master ? '👑' : '💻'} ${escapeHtml(n.hostname || n.node_id)} (${escapeHtml(n.lan_url || '-')})</span>`
   ).join(' ');
 
   bar.innerHTML = `
+    ${staleBanner}
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.55rem;">
       <div style="font-size:0.85rem; font-weight:700; color:var(--text);">🌐 สถานะการเชื่อมต่อระบบ & ซิงค์ข้อมูล <span class="badge" style="font-size:0.7rem; margin-left:0.25rem;">${escapeHtml(info.app_version || '')}</span></div>
       <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
@@ -1617,10 +1626,24 @@ async function loadManagerNetworkStatus() {
 async function triggerManagerSyncNow() {
   const res = await fetchJSON('/api/sync/auto-now', 'POST');
   await loadManagerNetworkStatus();
+  if (typeof loadSyncInfo === 'function') loadSyncInfo(false);
   if (res && res.success) {
     loadManagerDashboard();
   } else if (res && res.error) {
     alert('⚠️ ' + res.error);
+  }
+}
+
+async function triggerCleanPull() {
+  if (!confirm('ต้องการดึงข้อมูลล่าสุดจาก Master/GAS มาผสานลงเครื่องนี้ (โดยไม่ส่งข้อมูลเก่าขึ้นไปทับ) ใช่หรือไม่?')) return;
+  const res = await fetchJSON('/api/sync/clean-pull', 'POST');
+  await loadManagerNetworkStatus();
+  if (typeof loadSyncInfo === 'function') loadSyncInfo(false);
+  if (res && res.success) {
+    if (typeof showSyncStatus === 'function') showSyncStatus(res.message || '✅ Clean Pull สำเร็จ', true);
+    loadManagerDashboard();
+  } else {
+    alert('❌ ' + (res ? (res.message || res.error) : 'ไม่สามารถดึงข้อมูลล่าสุดได้'));
   }
 }
 

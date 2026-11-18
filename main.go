@@ -201,6 +201,7 @@ func main() {
 	syncGroup.Get("/export", syncHandler.ExportSnapshot)
 	syncGroup.Post("/import", syncHandler.ImportSnapshot)
 	syncGroup.Post("/peer", syncHandler.PeerSync)
+	syncGroup.Post("/clean-pull", syncHandler.CleanPullFromHub)
 
 	// 7. Disk Covers (uploaded/synced, read-and-close so Windows never locks files on delete) + Embedded Frontend Static Files
 	distFS, err := fs.Sub(embedDir, "dist")

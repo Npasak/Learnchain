@@ -188,29 +188,35 @@ function updateAndPruneNodes(ss, body, nowMs, timeoutMs) {
 
 // ผสานข้อมูล Snapshot ลงใน Google Sheet (Users, Lessons, Assignments, Progress, Certificates)
 function mergeSnapshotToSheets(ss, snap) {
-  // 1. Users
+  // 1. Users (LWW + DeletedUsers tombstone)
   var uSheet = getOrCreateSheet(ss, "Users", ["WalletAddress", "Email", "Name", "Ward", "Role", "PasswordHash", "JSON"]);
   mergeByKey(uSheet, snap.users || [], function(u) {
     return (u.email ? String(u.email).toLowerCase() + "|" + (u.role || "learner") : String(u.wallet_address));
   }, function(u) {
     return [u.wallet_address || "", u.email || "", u.name || "", u.ward || "", u.role || "learner", u.password_hash || "", JSON.stringify(u)];
+  }, snap.deleted_users || [], function(du) {
+    return (du.email ? String(du.email).toLowerCase() + "|" + (du.role || "learner") : String(du.wallet_address));
   });
 
-  // 2. Lessons
+  // 2. Lessons (LWW + DeletedLessons tombstone)
   var lSheet = getOrCreateSheet(ss, "Lessons", ["Title", "SortOrder", "StudyHours", "DurationSec", "OpenPeriod", "YoutubeURL", "JSON"]);
   mergeByKey(lSheet, snap.lessons || [], function(l) {
     return String(l.title || "");
   }, function(l) {
     return [l.title || "", l.sort_order || 1, l.study_hours || 1, l.duration_sec || 60, l.open_period || "", l.youtube_url || "", JSON.stringify(l)];
+  }, snap.deleted_lessons || [], function(dl) {
+    return String(dl.title || "");
   });
 
-  // 3. Assignments
+  // 3. Assignments (+ DeletedAssignments tombstone)
   var aSheet = getOrCreateSheet(ss, "Assignments", ["Key", "LessonTitle", "UserEmail", "UserWallet", "JSON"]);
   mergeByKey(aSheet, snap.assignments || [], function(a) {
     return String(a.lesson_title || "") + "|" + String(a.user_email || a.user_wallet || "").toLowerCase();
   }, function(a) {
     var key = String(a.lesson_title || "") + "|" + String(a.user_email || a.user_wallet || "").toLowerCase();
     return [key, a.lesson_title || "", a.user_email || "", a.user_wallet || "", JSON.stringify(a)];
+  }, snap.deleted_assignments || [], function(da) {
+    return String(da.lesson_title || "") + "|" + String(da.user_email || da.user_wallet || "").toLowerCase();
   });
 
   // 4. Progress
@@ -315,8 +321,11 @@ function getCoverFromDriveResponse(filename) {
   }
 }
 
-function mergeByKey(sheet, incomingList, keyFn, rowBuilderFn) {
-  if (!incomingList || incomingList.length === 0) return;
+function mergeByKey(sheet, incomingList, keyFn, rowBuilderFn, deletedList, delKeyFn) {
+  var hasIncoming = incomingList && incomingList.length > 0;
+  var hasDeleted = deletedList && deletedList.length > 0 && typeof delKeyFn === "function";
+  if (!hasIncoming && !hasDeleted) return;
+
   var data = sheet.getDataRange().getValues();
   var ncols = data[0].length;
   var map = {};
@@ -328,11 +337,37 @@ function mergeByKey(sheet, incomingList, keyFn, rowBuilderFn) {
       map[keyFn(obj)] = obj;
     } catch (e) {}
   }
-  for (var j = 0; j < incomingList.length; j++) {
-    var item = incomingList[j];
-    var k = keyFn(item);
-    if (!k) continue;
-    map[k] = item;
+
+  var delMap = {};
+  if (hasDeleted) {
+    for (var d = 0; d < deletedList.length; d++) {
+      var dItem = deletedList[d];
+      var dk = delKeyFn(dItem);
+      if (!dk) continue;
+      var dTs = dItem.deleted_at ? new Date(dItem.deleted_at).getTime() : 0;
+      if (!delMap[dk] || dTs > delMap[dk]) delMap[dk] = dTs;
+    }
+    for (var dkKey in delMap) {
+      if (map[dkKey]) {
+        var exTs = map[dkKey].updated_at ? new Date(map[dkKey].updated_at).getTime() : 0;
+        if (exTs <= delMap[dkKey]) delete map[dkKey];
+      }
+    }
+  }
+
+  if (hasIncoming) {
+    for (var j = 0; j < incomingList.length; j++) {
+      var item = incomingList[j];
+      var k = keyFn(item);
+      if (!k) continue;
+      var inTs = item.updated_at ? new Date(item.updated_at).getTime() : 0;
+      if (delMap[k] && inTs <= delMap[k]) continue;
+      if (map[k]) {
+        var curTs = map[k].updated_at ? new Date(map[k].updated_at).getTime() : 0;
+        if (inTs > 0 && curTs > 0 && inTs < curTs) continue;
+      }
+      map[k] = item;
+    }
   }
   var outRows = [];
   for (var key in map) {

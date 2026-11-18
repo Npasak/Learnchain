@@ -312,11 +312,12 @@ type LessonRating struct {
 	UserID       uint           `gorm:"not null;uniqueIndex:idx_user_lesson_rating" json:"-"`
 	Rating       int            `gorm:"not null" json:"rating"` // 1..5
 	Comment      string         `gorm:"type:text" json:"comment"`
-	IsReported   bool           `gorm:"default:false" json:"is_reported"`
-	ReportReason string         `gorm:"type:text" json:"report_reason,omitempty"`
-	ReportedBy   string         `json:"reported_by,omitempty"`
-	ReportedAt   *time.Time     `json:"reported_at,omitempty"`
-	CreatedAt    time.Time      `json:"created_at"`
+	IsReported         bool           `gorm:"default:false" json:"is_reported"`
+	ReportReason       string         `gorm:"type:text" json:"report_reason,omitempty"`
+	ReportedBy         string         `json:"reported_by,omitempty"`
+	ReportedAt         *time.Time     `json:"reported_at,omitempty"`
+	CommentModeratedAt *time.Time     `json:"comment_moderated_at,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
