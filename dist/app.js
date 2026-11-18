@@ -590,6 +590,31 @@ function buildLessonsMoreToggleHTML(isExpanded, totalCount, limit, toggleFnName)
   `;
 }
 
+function switchPortalTab(portal, tabKey) {
+  const tabsByPortal = {
+    learner: ['assigned', 'all', 'stats'],
+    creator: ['lessons', 'stats'],
+    manager: ['assign', 'stats']
+  };
+  const keys = tabsByPortal[portal] || [];
+  keys.forEach(k => {
+    const btn = document.getElementById(`${portal}TabBtn_${k}`);
+    const panel = document.getElementById(`${portal}Panel_${k}`);
+    const isActive = (k === tabKey);
+    if (btn) btn.classList.toggle('active', isActive);
+    if (panel) {
+      if (isActive) {
+        panel.classList.remove('hidden');
+        panel.style.animation = 'none';
+        void panel.offsetWidth;
+        panel.style.animation = '';
+      } else {
+        panel.classList.add('hidden');
+      }
+    }
+  });
+}
+
 function toggleShowAllOpenLessons() {
   showAllOpenLessons = !showAllOpenLessons;
   const input = document.getElementById('learnerSearchInput');
